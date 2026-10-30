@@ -1,0 +1,46 @@
+# AegisAI Architecture (scale path)
+
+```
+ Requesters (AI apps, enterprises)          Solana
+        │ POST /v1/verify                      ▲ batch Merkle root (Memo → PoV program)
+        ▼                                      │
+ ┌──────────────── Coordinator API ────────────┴──┐
+ │ decomposer · task queue · assigner (VRF-ish)   │
+ │ commit/reveal store · aggregator · rewards ledger│
+ └──────┬───────────────┬───────────────┬─────────┘
+        │ WSS/HTTPS     │               │
+  Browser PWA node  Python node   Docker node (future)
+  (phones, any OS)  (PC/RPi/server) (servers, GPU optional)
+```
+
+## Coordinator API (v1 draft)
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/nodes/register` | wallet pubkey + signed nonce, device class, capabilities |
+| GET | `/v1/tasks/next` | lease a micro-claim (TTL ~30 s) |
+| POST | `/v1/tasks/{id}/commit` | `H(vote‖salt‖node‖task)` |
+| POST | `/v1/tasks/{id}/reveal` | vote, salt, confidence |
+| GET | `/v1/stats` | network KPIs for dashboard (already mocked by `aegis_miner.coordinator`) |
+| POST | `/v1/verify` | (Phase 4, paid) submit AI output → claims → verdicts + receipt |
+| GET | `/v1/receipts/{id}` | verdict + Solana tx signature + Merkle proof |
+
+Auth: nodes sign requests with their wallet (ed25519); no private keys leave the device. Stateless API behind a load balancer; Postgres for ledger, Redis for task leases; batch attestation worker posts one Solana tx per N verdicts (cost-bounded).
+
+## Node types
+| Type | Runs on | Verifier | Status |
+|---|---|---|---|
+| Browser PWA (`aegisai-site/miner.html`) | Android, iOS, desktop browsers | JS rules → WASM/WebGPU ONNX | MVP (simulated) |
+| Python (`aegisai-miner`) | Windows/macOS/Linux/RPi/servers | rules → onnxruntime CPU | MVP (simulated) |
+| Docker | servers, cloud | same as Python, higher quota | planned |
+
+### How phones mine
+Open the site → "Add to Home Screen" (PWA) → connect Phantom (mobile in-app browser or deep link) → node leases tasks while the app is open, verifies locally in a Web Worker, commits/reveals, shows earned points. Rewards accrue to the wallet off-chain and are claimed in batches (low fees). Battery guard: pauses on low battery / not charging (configurable).
+
+## Reward pool (from the 85%)
+- Pool allocation published before mainnet; emitted per epoch (e.g. daily) with decaying schedule.
+- `reward_i = epoch_emission × (score_i / Σscore)`, `score = correct_weighted_votes × reputation × device_fairness_factor` (keeps phones competitive vs servers).
+- Claims via Merkle distributor (one root per epoch on Solana).
+- Developer 15% is **separate and vested**; never used for rewards.
+
+## Scaling notes
+Horizontal coordinators sharded by task id; attestation batched; read-heavy dashboard served from cached `/v1/stats` + Solana RPC/indexer (Helius) for holders and txs.

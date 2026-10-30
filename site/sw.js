@@ -1,0 +1,2 @@
+const C='agis-v2';self.addEventListener('install',e=>e.waitUntil(caches.open(C).then(c=>c.addAll(['index.html','miner.html','dashboard.html','protocol.html','docs-pov.md','js/pov.js','js/api.js','js/wallet.js','assets/agis-logo.png','api/mock-stats.json']))));
+self.addEventListener('fetch',e=>{if(e.request.method==='GET'&&new URL(e.request.url).origin===location.origin)e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});

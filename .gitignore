@@ -1,0 +1,7 @@
+.keys/
+*.seed
+github-pat
+node_modules/
+.env
+*.pem
+git-askpass.sh
