@@ -80,3 +80,29 @@ def test_http_errors(srv):
     assert _req(srv + "/v1/receipts/..%2Fr1/claims/0")[0] == 404
     assert _req(srv + "/v1/claims/verify-disclosure", [1])[0] == 400
     assert "/v1/receipts/{id}/claims/{index}" in coordinator.OPENAPI["paths"]
+
+def test_set_ok_and_consistency():
+    r = _rec(6); root = cm.claims_root(r)
+    v = cm.verify_disclosure_set([cm.disclose(r, i) for i in (0, 3, 5)], root)
+    assert v["ok"] and v["count"] == 3 and v["indices"] == [0, 3, 5] and v["root"] == root and v["leaf_count"] == 6
+    assert not cm.verify_disclosure_set([cm.disclose(r, 2), cm.disclose(r, 2)], root)["ok"]  # duplicate index
+    assert cm.verify_disclosure_set([cm.disclose(r, 2), cm.disclose(r, 2)], root)["reason"] == "duplicate index"
+    o = _rec(6, rid="other")
+    mixed = cm.verify_disclosure_set([cm.disclose(r, 0), cm.disclose(o, 1)])  # embedded roots differ -> splice caught
+    assert not mixed["ok"] and mixed["reason"] in ("mixed receipt_id", "mixed roots")
+    assert not cm.verify_disclosure_set([cm.disclose(r, 0), cm.disclose(o, 1)], root)["ok"]
+
+def test_set_malformed():
+    r = _rec(3); root = cm.claims_root(r)
+    for bad in (None, [], "x", [None], [cm.disclose(r, 0), 5], [cm.disclose(r, 0)] * 33):
+        assert cm.verify_disclosure_set(bad, root)["ok"] is False
+    t = cm.disclose(r, 1); t["claim"]["text"] = "forged"
+    v = cm.verify_disclosure_set([cm.disclose(r, 0), t], root); assert not v["ok"] and v["reason"].startswith("item 1")
+
+def test_http_disclosure_set(srv):
+    ds = [_req(srv + f"/v1/receipts/r1/claims/{i}")[1] for i in (0, 2)]
+    c, v = _req(srv + "/v1/claims/verify-disclosure", {"disclosures": ds})
+    assert c == 200 and v["ok"] and v["root_source"] == "stored" and v["count"] == 2
+    ds[1]["claims_root"] = "f" * 64; ds[1]["claim"]["text"] = "forged"
+    assert _req(srv + "/v1/claims/verify-disclosure", {"disclosures": ds})[1]["ok"] is False
+    c, v = _req(srv + "/v1/claims/verify-disclosure", {"disclosures": []}); assert c == 200 and not v["ok"]

@@ -96,3 +96,23 @@ def verify_disclosure(d, expected_root=None):
                 "root_source": "expected" if expected_root is not None else "embedded(untrusted)"}
     except Exception as e:
         return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
+
+MAX_SET = 32
+
+def verify_disclosure_set(ds, expected_root=None):
+    """Verify several disclosures from ONE receipt as a consistent set (e.g. "claims 0 and 3 were both verified").
+    Every item must verify against the same root, share receipt_id + leaf_count, and use distinct indices,
+    so a holder cannot splice claims from two different receipts or repeat one claim to inflate a count.
+    Returns {ok, reason, count, indices, root, items}; never raises."""
+    if not isinstance(ds, list) or not ds: return {"ok": False, "reason": "disclosures must be a non-empty list", "count": 0}
+    if len(ds) > MAX_SET: return {"ok": False, "reason": f"too many disclosures (max {MAX_SET})", "count": len(ds)}
+    items = [verify_disclosure(d, expected_root) for d in ds]
+    out = {"count": len(ds), "items": items, "indices": [d.get("index") if isinstance(d, dict) else None for d in ds]}
+    bad = [i for i, v in enumerate(items) if not v.get("ok")]
+    if bad: return {**out, "ok": False, "reason": f"item {bad[0]} failed: {items[bad[0]].get('reason')}"}
+    if len({d.get("receipt_id") for d in ds}) != 1: return {**out, "ok": False, "reason": "mixed receipt_id"}
+    if len({d.get("leaf_count") for d in ds}) != 1: return {**out, "ok": False, "reason": "mixed leaf_count"}
+    if len({v.get("root") for v in items}) != 1: return {**out, "ok": False, "reason": "mixed roots"}
+    if len(set(out["indices"])) != len(ds): return {**out, "ok": False, "reason": "duplicate index"}
+    return {**out, "ok": True, "reason": None, "root": items[0]["root"], "receipt_id": ds[0].get("receipt_id"),
+            "leaf_count": ds[0].get("leaf_count"), "root_source": items[0].get("root_source")}

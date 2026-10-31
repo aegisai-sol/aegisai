@@ -83,7 +83,7 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
                                      ("/v1/receipts/{id}", "get", "Single receipt"),
                                      ("/v1/receipts/{id}/proof", "get", "Shareable proof card: digest, nonce, vote tally, self-audit; no claim texts/client_id/MAC"),
                                      ("/v1/receipts/{id}/claims/{index}", "get", "Selective disclosure: one claim + salt + Merkle path to claims_root (others stay hidden)"),
-                                     ("/v1/claims/verify-disclosure", "post", "Check a claim disclosure against claims_root (expected_root from proof card)"),
+                                     ("/v1/claims/verify-disclosure", "post", "Check a claim disclosure (or {disclosures:[...]} set from one receipt, max 32, distinct indices) against claims_root (expected_root from proof card)"),
                                      ("/v1/receipts/verify", "post", "Audit a presented receipt: digest recompute, HMAC, matches stored copy"),
                                      ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
                                      ("/v1/metrics", "get", "Counters: verify_count, fee_preview_count, rate_limit_hits, body_rejected"),
@@ -210,14 +210,16 @@ class H(BaseHTTPRequestHandler):
             try: b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             except Exception: return self._send(400, {"error": "bad json"})
             if not isinstance(b, dict): return self._send(400, {"error": "object required"})
-            d, exp, src = b.get("disclosure", b), b.get("expected_root"), None
-            rid = d.get("receipt_id") if isinstance(d, dict) else None
+            multi = "disclosures" in b
+            d, exp, src = b.get("disclosures") if multi else b.get("disclosure", b), b.get("expected_root"), None
+            first = d[0] if multi and isinstance(d, list) and d else d
+            rid = first.get("receipt_id") if isinstance(first, dict) else None
             if exp is None and isinstance(rid, str) and rid.isalnum() and os.path.exists(os.path.join(RECEIPTS, rid + ".json")):
                 try:
                     stored = json.load(open(os.path.join(RECEIPTS, rid + ".json")))
                     if isinstance(stored, dict): exp, src = _cm.claims_root(stored), "stored"
                 except Exception: pass
-            r = _cm.verify_disclosure(d, exp)
+            r = _cm.verify_disclosure_set(d, exp) if multi else _cm.verify_disclosure(d, exp)
             if src: r["root_source"] = src
             return self._send(200, r)
         if self.path == "/v1/gate":
