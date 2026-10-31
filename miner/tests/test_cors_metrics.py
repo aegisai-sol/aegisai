@@ -30,7 +30,7 @@ def test_metrics_counts():
     s, base = _srv()
     try:
         m0 = json.load(urllib.request.urlopen(base + "/v1/metrics"))
-        assert set(m0) == {"verify_count", "fee_preview_count", "rate_limit_hits"}
+        assert set(m0) == {"verify_count", "fee_preview_count", "rate_limit_hits", "body_rejected"}
         req = lambda: urllib.request.Request(base + "/v1/fee-preview", json.dumps({"fee_micro": 1000}).encode(), {"Content-Type": "application/json"})
         urllib.request.urlopen(req())
         try: urllib.request.urlopen(req())

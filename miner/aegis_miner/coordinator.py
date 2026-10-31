@@ -29,7 +29,7 @@ def health():
     peers = [p for p in os.environ.get("AEGIS_PEERS", "").split(",") if p.strip()]
     return {"ok": True, "uptime_s": int(time.time() - START), "peers": len(peers), "quorum": consensus.env_quorum(),
             "citation_policy": "https-only" if os.environ.get("AEGIS_ALLOW_HTTP") != "1" else "http-allowed(dev)",
-            "max_redirects": verify.MAX_REDIRECTS, "anchor": "devnet" if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" else "off",
+            "max_redirects": verify.MAX_REDIRECTS, "max_body": max_body(), "anchor": "devnet" if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" else "off",
             "token_mode": token_bridge.state_from_env().mode,
             "peer_liveness": consensus.peer_liveness(peers),
             "peer_health": consensus.PEER_HEALTH.summary(peers), "protocol_version": PROTOCOL_VERSION, "claim_schema": CLAIM_SCHEMA,
@@ -60,7 +60,7 @@ LIMITER = RateLimiter.from_env()
 RATE_LIMITED = ("/v1/verify", "/v1/fee-preview", "/v1/gate/batch", "/v1/receipts/verify")
 OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version": "0.1.0",
            "description": "Proof-of-Source verification coordinator (devnet/testing; no mainnet token)."},
-           "paths": {p: {m: {"summary": d, "responses": {"200": {"description": "OK"}, **({"429": {"description": "Rate limited (Retry-After header)"}} if p in RATE_LIMITED else {})}}}
+           "paths": {p: {m: {"summary": d, "responses": {"200": {"description": "OK"}, **({"429": {"description": "Rate limited (Retry-After header)"}} if p in RATE_LIMITED else {}), **({"413": {"description": "Body exceeds AEGIS_MAX_BODY"}} if m == "post" else {})}}}
                      for p, m, d in (("/v1/verify", "post", "Verify a claim against an HTTPS source; returns signed receipt"),
                                      ("/v1/fee-preview", "post", "Preview 70/20/5/5 fee split"),
                                      ("/v1/gate/batch", "post", "Batch gate: {action, claims[<=50]} -> overall + per-claim decisions"),
@@ -72,9 +72,24 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
                                      ("/v1/receipts/{id}", "get", "Single receipt"),
                                      ("/v1/receipts/verify", "post", "Audit a presented receipt: digest recompute, HMAC, matches stored copy"),
                                      ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
-                                     ("/v1/metrics", "get", "Counters: verify_count, fee_preview_count, rate_limit_hits"),
+                                     ("/v1/metrics", "get", "Counters: verify_count, fee_preview_count, rate_limit_hits, body_rejected"),
                                      ("/v1/openapi.json", "get", "This document"))}}
-METRICS = {"verify_count": 0, "fee_preview_count": 0, "rate_limit_hits": 0}
+METRICS = {"verify_count": 0, "fee_preview_count": 0, "rate_limit_hits": 0, "body_rejected": 0}
+DEFAULT_MAX_BODY, MAX_BODY_CAP = 262144, 4194304
+def max_body(env=None):
+    """AEGIS_MAX_BODY bytes for POST bodies: default 256 KiB, clamp 1024..4 MiB, invalid -> default."""
+    raw = (os.environ if env is None else env).get("AEGIS_MAX_BODY", "")
+    try: v = int(str(raw).strip())
+    except ValueError: return DEFAULT_MAX_BODY
+    return max(1024, min(MAX_BODY_CAP, v))
+def body_check(content_length, limit=None):
+    """Validate a Content-Length header before reading. Returns (code, error) or None if acceptable."""
+    limit = max_body() if limit is None else limit
+    if content_length is None or str(content_length).strip() == "": return None
+    s = str(content_length).strip()
+    if not s.isdigit(): return (400, "invalid Content-Length")
+    if int(s) > limit: return (413, f"body too large (max {limit} bytes)")
+    return None
 def cors_origin(origin, spec=None):
     """AEGIS_CORS_ORIGINS: comma list of allowed origins; unset/empty/'*' = '*' (demo). Returns header value or None."""
     spec = (os.environ.get("AEGIS_CORS_ORIGINS", "") if spec is None else spec).strip()
@@ -131,6 +146,10 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/api/votes": self._send(200, VOTES[-100:])
         else: self._send(404, {"error": "not found"})
     def do_POST(self):
+        bad = body_check(self.headers.get("Content-Length"))
+        if bad:  # reject before reading or rate-limit accounting; never buffers oversized bodies
+            METRICS["body_rejected"] += 1; self.close_connection = True
+            return self._send(bad[0], {"error": bad[1], "max_body": max_body()}, (("Connection", "close"),))
         if self.path in RATE_LIMITED:
             ok, retry = LIMITER.check(self.client_address[0])
             if not ok: METRICS["rate_limit_hits"] += 1; return self._send(429, {"error": "rate limited", "retry_after": retry}, (("Retry-After", str(retry)),))
