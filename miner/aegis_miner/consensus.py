@@ -157,7 +157,27 @@ class PeerHealth:
         if self.half_life > 0 and bonus > 0 and "last_ok" in s:
             idle = max(0.0, self._clock() - s["last_ok"])
             bonus *= 0.5 ** (idle / self.half_life)
-        return 1.0 + bonus
+        return (1.0 + bonus) * self.disagree_factor(endpoint)
+
+    # Disagreement decay (documented contract):
+    #   factor = 0.5 ** min(d, disagree_cap),  d = consecutive votes that disagreed with a reached consensus
+    #   weight = (1 + bonus) * factor  -> a chronic dissenter fades toward (1+bonus)/2**cap (cap=4 -> >= 1/16),
+    #   never 0 (liveness, not disagreement, decides exclusion). One agreeing vote resets d to 0.
+    #   Votes when no consensus was reached (consensus_vote None) or errored votes don't count either way.
+    disagree_cap = 4
+
+    def observe_vote(self, endpoint, agreed):
+        s = self._s.setdefault(endpoint, {"alive": True, "fails": 0, "oks": 0})
+        s["disagree"] = 0 if agreed else s.get("disagree", 0) + 1
+        return s["disagree"]
+
+    def disagree_factor(self, endpoint):
+        d = self._s.get(endpoint, {}).get("disagree", 0)
+        return 0.5 ** min(d, self.disagree_cap)
+
+    def disagreements(self, endpoints):
+        """{peerN: consecutive disagreement streak} — ids only."""
+        return {f"peer{i}": self._s.get(e, {}).get("disagree", 0) for i, e in enumerate(endpoints)}
 
     def weights(self, endpoints):
         """{peerN: weight} keyed by ids only (URLs never exposed)."""
@@ -173,7 +193,8 @@ class PeerHealth:
         alive = [e for e in endpoints if self.is_alive(e)]
         return {"alive": len(alive), "dead": len(endpoints) - len(alive), "known": len(endpoints),
                 "fail_threshold": self.n, "recover_threshold": self.m,
-                "weights": self.weights(endpoints), "weight_cap": self.weight_cap, "weight_half_life": self.half_life}
+                "weights": self.weights(endpoints), "weight_cap": self.weight_cap, "weight_half_life": self.half_life,
+                "disagree_streaks": self.disagreements(endpoints), "disagree_cap": self.disagree_cap}
 
     def alive_endpoints(self, endpoints): return [e for e in endpoints if self.is_alive(e)]
 
@@ -238,5 +259,7 @@ def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node
         nid = r.get("node") or ""
         if nid.startswith("peer") and nid[4:].isdigit() and int(nid[4:]) < len(peers):
             health.observe(peers[int(nid[4:])], not r.get("error"))
+            if rec.get("consensus_vote") is not None and r.get("vote") and not r.get("error"):
+                health.observe_vote(peers[int(nid[4:])], r["vote"] == rec["consensus_vote"])
     rec["peer_selection"] = info
     return rec

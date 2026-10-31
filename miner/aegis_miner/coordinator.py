@@ -32,7 +32,15 @@ def health():
             "max_redirects": verify.MAX_REDIRECTS, "anchor": "devnet" if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" else "off",
             "token_mode": token_bridge.state_from_env().mode,
             "peer_liveness": consensus.peer_liveness(peers),
-            "peer_health": consensus.PEER_HEALTH.summary(peers), "protocol_version": PROTOCOL_VERSION, "claim_schema": CLAIM_SCHEMA}
+            "peer_health": consensus.PEER_HEALTH.summary(peers), "protocol_version": PROTOCOL_VERSION, "claim_schema": CLAIM_SCHEMA,
+            "weighting": weighting_summary()}
+
+def weighting_summary(env=None):
+    """Is weighted quorum on? half_life only when fade is set (>0)."""
+    w = {"weighted_quorum": consensus.weighted_quorum_enabled(env)}
+    hl = consensus.PEER_HEALTH.half_life
+    if hl > 0: w["half_life"] = hl
+    return w
 def list_receipts(limit=20, offset=0):
     """Newest-first page of receipt summaries (id, mtime, status). No bodies, so pages stay small."""
     ids = sorted((f for f in (os.listdir(RECEIPTS) if os.path.isdir(RECEIPTS) else []) if f.endswith(".json")),
