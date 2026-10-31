@@ -66,3 +66,9 @@ When a job reaches `verified`/`failed`, the claim server sends one **Solana Memo
 - Retrieve: user enters Seal ID + key → page GETs `/api/rwa/jobs/:id?full=1` (ciphertext) → decrypts locally → re-checks fingerprint → preview via blob URL. The key is never sent.
 - localStorage keeps seal IDs; keys only if the user ticks "save key on this device". Sharing = user gives key off-platform.
 - GDPR: uploader is controller; only ciphertext off-chain (deletable), hash on-chain.
+
+## RWA recovery (Wave A + A2)
+- **A · Same file:** `GET /api/rwa/by-fingerprint/:sha256` (or `?fp=`) → public fields only (id, status, receiptTx, created, minimal meta, `walletRecovery` flag). Lost phone but have the file → re-hash → proof, no key. `proof.html?id=` / `?fp=` = status + Solscan.
+- **A2 · Wallet-bound key wrap (lost phone AND lost `agis1:` key):** on Private seal (checkbox, default ON when Phantom connected) the browser signs `AEGIS/rwa-keywrap/v1|wallet|sealId|fp` in Phantom; wrap key = HKDF-SHA256(ikm=signature, salt="AEGIS/rwa-keywrap/v1", info=`sealId|fp`) → AES-GCM-256; blob = b64(iv12‖AESGCM(rawKey)). Ed25519 is deterministic → same wallet re-derives on any device. The derivation signature never leaves the browser. Blob attached via `POST /api/rwa/jobs/:id/keywrap` authorised by a *separate* signature `AEGIS/rwa-keywrap-attach/v1|wallet|id|fp|ts`; write-once. Job fields: `keyWrap`, `wrapWallet`, `wrapAlg`. Retrieve → "Unlock with wallet" → sign → unwrap → decrypt locally.
+- Honesty: we never custody keys; only that wallet can unwrap; nobody can forge a wrap for another wallet's seal (attach requires that wallet's signature, write-once). Caveat: a wallet that signs the exact keywrap message on a phishing site leaks that seal's wrap key — only sign on aegisai-sol.github.io.
+- **Seed also lost:** social recovery 2-of-3 guardians (Shamir shares of the AES key, each wrapped to a guardian wallet) — stub/TODO, not implemented.
