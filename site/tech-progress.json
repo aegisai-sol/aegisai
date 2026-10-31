@@ -1,76 +1,131 @@
 {
   "project": "AegisAI PoV-R",
-  "updated_at": "2026-10-31T03:50:00+02:00",
+  "updated_at": "2026-10-31T03:43:42+02:00",
   "milestones": [
     {
       "id": "decompose",
       "title": "Micro-claim decomposition (lists, sentences, URL-safe)",
       "status": "done",
       "updated_at": "2026-10-25T12:00:00+02:00",
-      "note": "aegis_miner/verify.py split_sentences + decompose"
+      "note": "aegis_miner/verify.py split_sentences + decompose",
+      "detail": "aegis_miner/verify.py split_sentences + decompose"
     },
     {
       "id": "arith",
       "title": "Exact arithmetic checker",
       "status": "done",
       "updated_at": "2026-10-25T12:00:00+02:00",
-      "note": "Deterministic, conf 0.99"
+      "note": "Deterministic, conf 0.99",
+      "detail": "Deterministic, conf 0.99"
     },
     {
       "id": "verify-api",
       "title": "Coordinator POST /v1/verify + receipts",
       "status": "done",
       "updated_at": "2026-10-27T12:00:00+02:00",
-      "note": "Receipt per request, GET /v1/receipts/<id>"
+      "note": "Receipt per request, GET /v1/receipts/<id>",
+      "detail": "Receipt per request, GET /v1/receipts/<id>"
     },
     {
       "id": "credits",
       "title": "Non-transferable Proof Credits",
       "status": "done",
       "updated_at": "2026-10-27T12:00:00+02:00",
-      "note": "Awarded only for confident votes"
+      "note": "Awarded only for confident votes",
+      "detail": "Awarded only for confident votes"
     },
     {
       "id": "canaries",
       "title": "Calibration canaries",
       "status": "done",
       "updated_at": "2026-10-28T12:00:00+02:00",
-      "note": "Failed canary = flagged receipt, 0 credits"
+      "note": "Failed canary = flagged receipt, 0 credits",
+      "detail": "Failed canary = flagged receipt, 0 credits"
     },
     {
       "id": "quote-match",
       "title": "Cited quote match on source page",
       "status": "done",
       "updated_at": "2026-10-28T12:00:00+02:00",
-      "note": "Exact normalized match + SHA-256 page hash"
+      "note": "Exact normalized match + SHA-256 page hash",
+      "detail": "Exact normalized match + SHA-256 page hash"
+    },
+    {
+      "id": "browser-demo",
+      "title": "Browser verify demo (verify.html)",
+      "status": "done",
+      "updated_at": "2026-10-31T03:30:00+02:00",
+      "note": "Live client against verify API + PoV demo video",
+      "detail": "Live client against verify API + PoV demo video"
     },
     {
       "id": "pos-support",
       "title": "Proof-of-Source: claim support check vs cited page",
       "status": "done",
       "updated_at": "2026-10-31T03:50:00+02:00",
-      "note": "Fetch + fingerprint + best-passage support, number contradiction, near-quote, SSRF guard"
+      "note": "Fetch + fingerprint + best-passage support, number contradiction, near-quote, SSRF guard",
+      "commit": "4a3dd97",
+      "detail": "Fetch + fingerprint + best-passage support, number contradiction, near-quote, SSRF guard"
+    },
+    {
+      "id": "semantic",
+      "title": "Meaning-v1 support scorer (negation, paraphrase, antonym contradiction)",
+      "status": "done",
+      "updated_at": "2026-10-31T03:50:00+02:00",
+      "note": "Shipped 377b0ae: stemming + synonym concepts, negation parity, antonym flip -> CONTRADICTED; 13/13 tests",
+      "commit": "377b0ae",
+      "detail": "Shipped 377b0ae: stemming + synonym concepts, negation parity, antonym flip -> CONTRADICTED; 13/13 tests"
+    },
+    {
+      "id": "token-bridge",
+      "title": "Token bridge: receipt digest, claim quote, unsigned claim intent",
+      "status": "done",
+      "updated_at": "2026-10-31T03:30:00+02:00",
+      "commit": "ec4e709",
+      "note": "/v1/claim-quote + /v1/token-state; off-chain mode, no keys held",
+      "detail": "/v1/claim-quote + /v1/token-state; off-chain mode, no keys held"
     },
     {
       "id": "multi-fetch",
       "title": "Multi-node fetch consensus (independent miners agree on hash)",
       "status": "next",
       "updated_at": "2026-10-31T03:40:00+02:00",
-      "note": "Miners re-fetch; receipt valid when >=2 hashes/verdicts agree"
+      "note": "Miners re-fetch; receipt valid when >=2 hashes/verdicts agree",
+      "detail": "Miners re-fetch; receipt valid when >=2 hashes/verdicts agree"
     },
     {
-      "id": "semantic",
-      "title": "Meaning-based support scoring (negation, paraphrase, contradiction)",
-      "status": "active",
+      "id": "embeddings",
+      "title": "Optional local embedding/NLI scorer",
+      "status": "next",
       "updated_at": "2026-10-31T03:50:00+02:00",
-      "note": "Shipped meaning-v1: stemming + synonym concepts, negation parity, antonym flip -> CONTRADICTED. Next: optional local embedding/NLI model"
+      "note": "Optional upgrade over meaning-v1",
+      "detail": "Optional upgrade over meaning-v1"
     },
     {
       "id": "devnet-memo",
       "title": "Receipt hash anchored on Solana devnet",
       "status": "next",
       "updated_at": "2026-10-31T03:40:00+02:00",
-      "note": "Coordinator hook ready: AEGIS_ANCHOR_RECEIPTS=1 (default off, devnet only). No mainnet mint"
+      "note": "Hook shipped (AEGIS_ANCHOR_RECEIPTS=1, default OFF, devnet only). Not yet run live on devnet",
+      "detail": "Hook shipped (AEGIS_ANCHOR_RECEIPTS=1, default OFF, devnet only). Not yet run live on devnet"
+    },
+    {
+      "id": "mint-reservoir",
+      "title": "AGIS mint + Reservoir on-chain",
+      "status": "blocked",
+      "updated_at": "2026-10-31T03:50:00+02:00",
+      "note": "Option A: blocked until LP funding + audit. No mint now",
+      "detail": "Option A: blocked until LP funding + audit. No mint now"
     }
-  ]
+  ],
+  "now": "Next: multi-node fetch agreement",
+  "now_detail": "Meaning-v1 shipped (377b0ae). Bar moves only when code is committed with green tests.",
+  "counts": {
+    "active": 0,
+    "blocked": 1,
+    "done": 10,
+    "next": 3,
+    "total": 14
+  },
+  "active_progress": 0
 }

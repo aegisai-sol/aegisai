@@ -88,3 +88,4 @@ footer b{color:var(--gold)}
 .tp-active .tp-dot{border-color:#f5c542;background:#f5c542;animation:tpPulse 1.6s infinite}
 .tp-next em{color:#64748b}
 @media (prefers-reduced-motion:reduce){.tp-fill,.tp-fill:after,.tp-live i,.tp-active .tp-dot{animation:none;transition:none}}
+.tp-blocked em{color:#b45309}.tp-blocked .tp-dot{background:#b45309}

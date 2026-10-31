@@ -14,7 +14,7 @@
     root.querySelector('[data-tp=upd]').textContent=d.updated?('Updated '+new Date(d.updated).toLocaleString()):'';
     root.querySelector('.tp-fill').style.width=pct+'%';
     root.querySelector('.tp-steps').innerHTML=ms.map(function(m){
-      var lbl={done:'Done',active:'Building now',next:'Next'}[m.status]||m.status;
+      var lbl={done:'Done',active:'Building now',next:'Next',blocked:'Blocked'}[m.status]||m.status;
       return '<li class="tp-step tp-'+esc(m.status)+'"><span class="tp-dot"></span><div><b>'+esc(m.title)+'</b><em>'+esc(lbl)+(m.status==='active'?' · '+ap+'%':'')+'</em><p>'+esc(m.detail)+'</p></div></li>';
     }).join('');
   }
