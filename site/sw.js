@@ -1,5 +1,5 @@
-const C='agis-v8';
-self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(C).then(c=>c.addAll(['index.html','miner.html','dashboard.html','protocol.html','docs-pov.md','js/pov.js','js/api.js','js/wallet.js','js/miner-worker.js','js/tokenomics.js','js/live.js','rwa.html','manifest.webmanifest','assets/agis-logo.png','api/mock-stats.json'])))});
+const C='agis-v9';
+self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(C).then(c=>c.addAll(['index.html','miner.html','dashboard.html','protocol.html','docs-pov.md','js/pov.js','js/api.js','js/wallet.js','js/miner-worker.js','js/tokenomics.js','js/live.js','rwa.html','howto.html','proof.html','js/rwa-jobs.js','manifest.webmanifest','assets/agis-logo.png','api/mock-stats.json'])))});
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==C).map(x=>caches.delete(x)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{if(e.request.method==='GET'&&new URL(e.request.url).origin===location.origin)e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});
 // Keep-alive: page heartbeats; SW replies so clients know it is alive. Periodic sync (Chromium installed PWA) pings open clients.

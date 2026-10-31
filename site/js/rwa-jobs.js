@@ -5,6 +5,8 @@ export const health = () => j(RWA_API + '/health', { signal: AbortSignal.timeout
 export const createJob = body => j(RWA_API + '/jobs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 export const listJobs = (status = 'open') => j(RWA_API + '/jobs?status=' + status).then(d => d.jobs);
 export const getJob = (id, full = false) => j(RWA_API + '/jobs/' + id + (full ? '?full=1' : '')).then(d => d.job);
+// Recovery: public proof by fingerprint (no key). Falls back to list scan if server not yet redeployed.
+export const byFingerprint = fp => j(RWA_API + '/by-fingerprint/' + fp).then(d => d.seals).catch(() => listJobs('all').then(a => a.filter(x => x.fingerprint === fp)));
 export const b64 = buf => { let s = ''; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
 // Integrity check without decrypting: fingerprint shape + ciphertext decodes + AES-GCM tag room.
 export async function integrityCheck(id) {
@@ -23,4 +25,4 @@ export async function vote(id, fingerprint, result) {
   const { signature } = await p.signMessage(new TextEncoder().encode(msg), 'utf8');
   return j(RWA_API + '/jobs/' + id + '/vote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ wallet, msg, sig: b64(signature), result }) });
 }
-if (typeof window !== 'undefined') window.agisRwa = { health, createJob, listJobs, getJob, integrityCheck, vote };
+if (typeof window !== 'undefined') window.agisRwa = { health, byFingerprint, createJob, listJobs, getJob, integrityCheck, vote };
