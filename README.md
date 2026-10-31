@@ -52,3 +52,7 @@ cd /workspace/aegisai-site && python3 -m http.server 8080              # http://
 
 ## Security
 No private keys or seeds in any repo (`.keys/`, `.env` gitignored). Never share a seed phrase. Mainnet requires `MAINNET=1 --yes-mainnet`. Not financial advice.
+
+### Receipt HMAC + claim normalizer v2
+- `AEGIS_RECEIPT_HMAC=<secret>`: coordinator adds `mac` (HMAC-SHA256 over the receipt digest); `/v1/gate` and `/v1/gate/batch` return **DENY** for receipts with a missing or bad MAC. Unset = no MAC required. The secret is never logged or returned.
+- Claims are normalized with versioned `claim_norm` v2 (NFKC, smart quotes/dashes → ASCII, zero-width stripped). The gate matches v1 and v2 digests for back-compat.

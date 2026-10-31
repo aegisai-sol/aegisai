@@ -4,7 +4,7 @@ ALLOW / DENY / REQUIRE_RECEIPT from the local receipt store. Pure read-only: nev
   DENY             a valid receipt has the claim voted FALSE (contradicted), or the receipt was tampered
   REQUIRE_RECEIPT  no valid receipt covers the claim (or only UNSURE / flagged ones) -> run /v1/verify first
 """
-import hashlib, json, os, re, time
+import hashlib, json, os, re, time, unicodedata
 from aegis_miner import token_bridge
 MAX_BATCH = 50
 
@@ -15,10 +15,27 @@ def ttl_s():
 
 ACTIONS = ("publish", "post", "cite", "trade", "pay", "execute")
 
-def claim_digest(text):
-    """SHA-256 of the normalized claim (casefold, collapsed whitespace, trailing punctuation stripped)."""
-    t = re.sub(r"\s+", " ", (text or "").casefold()).strip().rstrip(".!?;: ")
-    return hashlib.sha256(t.encode()).hexdigest()
+NORM_VERSION = 2  # current claim normalizer; receipts record it as "claim_norm"
+NORM_VERSIONS = (1, 2)
+_QUOTES = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-"})
+
+def normalize_claim(text, version=NORM_VERSION):
+    """v1: casefold, collapse whitespace, strip trailing punctuation.
+    v2: v1 + Unicode NFKC, smart quotes/dashes -> ASCII, zero-width chars removed."""
+    t = text or ""
+    if version >= 2:
+        t = unicodedata.normalize("NFKC", t).translate(_QUOTES)
+        t = re.sub(r"[\u200b-\u200d\ufeff]", "", t)
+    elif version != 1: raise ValueError("unknown norm version")
+    return re.sub(r"\s+", " ", t.casefold()).strip().rstrip(".!?;: ")
+
+def claim_digest(text, version=NORM_VERSION):
+    """SHA-256 of the normalized claim (versioned normalizer)."""
+    return hashlib.sha256(normalize_claim(text, version).encode()).hexdigest()
+
+def _claim_matches(text, d):
+    """Match a query digest against any known normalizer version (back-compat with v1 receipts)."""
+    return any(claim_digest(text, v) == d for v in NORM_VERSIONS)
 
 def _receipts(store):
     if not os.path.isdir(store): return
@@ -35,12 +52,12 @@ def decide(action, store, claim=None, digest=None, now=None):
     seen, ttl, now = [], ttl_s(), now if now is not None else time.time()
     for r in _receipts(store):
         for c in r.get("claims", []):
-            if c.get("canary") or claim_digest(c.get("text")) != d: continue
-            intact = r.get("digest") == token_bridge.receipt_digest(r)
+            if c.get("canary") or not _claim_matches(c.get("text"), d): continue
+            intact = r.get("digest") == token_bridge.receipt_digest(r) and token_bridge.mac_ok(r)
             seen.append({"receipt_id": r.get("receipt_id"), "vote": c.get("vote"), "flagged": bool(r.get("flagged")), "intact": intact,
                          "expired": bool(ttl) and (now - float(r.get("ts") or 0)) > ttl})
     base = {"action": action, "claim_digest": d, "matches": seen[:10], "note": "Gate is advisory and read-only; no signing or on-chain action."}
-    if any(not m["intact"] for m in seen): return dict(base, decision="DENY", reason="receipt digest mismatch (tampered)")
+    if any(not m["intact"] for m in seen): return dict(base, decision="DENY", reason="receipt digest/MAC mismatch (tampered or unsigned)")
     good = [m for m in seen if not m["flagged"] and not m["expired"]]
     base["ttl_s"] = ttl
     if any(m["vote"] == "FALSE" for m in good): return dict(base, decision="DENY", reason="claim contradicted by a valid receipt")

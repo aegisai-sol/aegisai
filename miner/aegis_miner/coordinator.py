@@ -160,7 +160,10 @@ class H(BaseHTTPRequestHandler):
         rec = {"receipt_id": rid, "client_id": cid, "ts": time.time(), "claims": claims,
                "credits_awarded": n, "calibration": {"ok": ok, "failed": bad},
                "flagged": not ok, "reservoir_note": RESERVOIR_NOTE, "onchain": "PENDING (devnet memo later)"}
+        rec["claim_norm"] = 2
         rec["digest"] = token_bridge.receipt_digest(rec)
+        mac = token_bridge.receipt_mac(rec)  # AEGIS_RECEIPT_HMAC; secret never logged
+        if mac: rec["mac"] = mac
         if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" and os.environ.get("MAINNET") != "1":  # default OFF; devnet only
             try:
                 from aegis_miner.solana_submit import SolanaSubmitter

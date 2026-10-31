@@ -2,6 +2,7 @@
 Token state lives behind TokenState. Today: OffchainState (jsonl, no token). Later: SplState reading the
 SPL mint + Reservoir token account on Solana. No private keys are ever read here: signing is done by the
 operator's Phantom / vault-held keypair outside this process; we only emit unsigned claim intents."""
+import os
 import hashlib, json, os, time
 from aegis_miner import credits
 
@@ -12,6 +13,26 @@ def receipt_digest(rec):
     """Canonical SHA-256 of a receipt (what gets anchored via devnet memo later)."""
     core = {k: rec[k] for k in ("receipt_id", "client_id", "claims", "credits_awarded") if k in rec}
     return hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+def hmac_secret():
+    """AEGIS_RECEIPT_HMAC secret bytes or None. Never logged or returned."""
+    v = os.environ.get("AEGIS_RECEIPT_HMAC", "")
+    return v.encode() if v else None
+
+def receipt_mac(rec, secret=None):
+    """HMAC-SHA256 over the receipt digest. Returns None when no secret configured."""
+    import hmac as _hm
+    k = secret if secret is not None else hmac_secret()
+    if not k: return None
+    return "hmac-sha256:" + _hm.new(k, receipt_digest(rec).encode(), hashlib.sha256).hexdigest()
+
+def mac_ok(rec, secret=None):
+    """True if no secret configured, else constant-time check of rec['mac']."""
+    import hmac as _hm
+    want = receipt_mac(rec, secret)
+    if want is None: return True
+    got = rec.get("mac")
+    return isinstance(got, str) and _hm.compare_digest(got, want)
 
 class TokenState:
     mode = "abstract"
