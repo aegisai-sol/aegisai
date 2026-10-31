@@ -69,3 +69,22 @@ footer b{color:var(--gold)}
 }
 @media(max-width:520px){.timeline{grid-template-columns:1fr}.nav .connect{display:none}.burger{margin-left:auto}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Live tech progress */
+#tech-progress{background:linear-gradient(160deg,#0b1730,#081022);border:1px solid rgba(34,211,238,.18);border-radius:1.25rem;padding:1.5rem;box-shadow:0 0 40px rgba(34,211,238,.06)}
+.tp-live{display:inline-flex;align-items:center;gap:.4rem;font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;color:#22d3ee}
+.tp-live i{width:.5rem;height:.5rem;border-radius:50%;background:#22d3ee;animation:tpPulse 1.6s infinite}
+@keyframes tpPulse{0%{box-shadow:0 0 0 0 rgba(34,211,238,.7)}70%{box-shadow:0 0 0 10px rgba(34,211,238,0)}100%{box-shadow:0 0 0 0 rgba(34,211,238,0)}}
+.tp-track{position:relative;height:.6rem;border-radius:99px;background:rgba(148,163,184,.15);overflow:hidden;margin:1rem 0 .4rem}
+.tp-fill{height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#22d3ee,#f5c542);transition:width 1.4s cubic-bezier(.2,.8,.2,1);position:relative;overflow:hidden}
+.tp-fill:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent);transform:translateX(-100%);animation:tpShine 2.4s infinite}
+@keyframes tpShine{to{transform:translateX(100%)}}
+.tp-steps{list-style:none;margin:1.25rem 0 0;padding:0;display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+.tp-step{display:flex;gap:.65rem;padding:.8rem;border-radius:.8rem;background:rgba(15,23,42,.6);border:1px solid rgba(148,163,184,.12);font-size:.82rem}
+.tp-step b{display:block;color:#e2e8f0}.tp-step em{font-style:normal;font-size:.7rem;text-transform:uppercase;letter-spacing:.08em}.tp-step p{color:#94a3b8;margin-top:.25rem}
+.tp-dot{flex:none;width:.8rem;height:.8rem;margin-top:.2rem;border-radius:50%;border:2px solid #475569}
+.tp-done .tp-dot{background:#22c55e;border-color:#22c55e}.tp-done em{color:#22c55e}
+.tp-active{border-color:rgba(245,197,66,.5);box-shadow:0 0 24px rgba(245,197,66,.12)}.tp-active em{color:#f5c542}
+.tp-active .tp-dot{border-color:#f5c542;background:#f5c542;animation:tpPulse 1.6s infinite}
+.tp-next em{color:#64748b}
+@media (prefers-reduced-motion:reduce){.tp-fill,.tp-fill:after,.tp-live i,.tp-active .tp-dot{animation:none;transition:none}}
