@@ -27,7 +27,7 @@
 </select>
 <span class="text-[11px] text-slate-500">Written into the Solana Memo. Anyone with the QR can see if it is still inside the window. The chain record itself stays forever.
 </label>
-<p class="mt-4 text-xs text-emerald-300">Step 1 — Seal is free: your browser makes the fingerprint, no wallet needed.<br><span class="text-slate-400">Step 2 — Put on Solana (optional, permanent): needs your wallet + a tiny SOL network fee (~0.000005 SOL), paid by you.</span></p><button id="sub" class="mt-5 w-full py-3 rounded-xl bg-gold text-navy font-bold disabled:opacity-40" disabled>Create seal</button>
+<p class="mt-4 text-xs text-emerald-300">Step 1 — Seal is free: your browser makes the fingerprint, no wallet needed.<br><span class="text-slate-400">Step 2 — Put on Solana (optional, permanent): needs your wallet + a tiny SOL network fee (~0.000005 SOL), paid by you.</span><br><span class="text-cyan">Pay with SOL — available now. Pay with AGIS — coming after liquidity (AGIS covers the gas via swap; the rest is burned).</span></p><button id="sub" class="mt-5 w-full py-3 rounded-xl bg-gold text-navy font-bold disabled:opacity-40" disabled>Create seal</button>
 <div id="res" class="hidden mt-4 text-sm bg-deep border border-cyan/20 rounded p-4 space-y-1"></div>
 <label class="flex gap-2 mt-3 text-xs text-slate-300"><input id="wrapK" type="checkbox"> <b>Optional</b></label>
 <label class="flex gap-2 mt-3 text-xs text-slate-400"><input id="saveK" type="checkbox"> Save key on this device (off = safer; you must keep the key yourself)</label><p class="text-[11px] text-slate-500 mt-3">Private mode: AES-256-GCM in your browser; save the key — we never see it. Encrypted copy limit for the network in v1: ~2.9 MB (bigger files → public anchor).</p></section>
