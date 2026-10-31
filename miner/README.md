@@ -34,3 +34,13 @@ No secrets, no keypairs, no Solana submit in the image. Data lives in the `/data
 **Coordinator ops:** `AEGIS_RATE_LIMIT=N/SEC` (e.g. `30/60`, per-IP on `/v1/verify` + `/v1/fee-preview`, off by default) · `AEGIS_CORS_ORIGINS=https://a,https://b` (default `*`) · spec at `GET /v1/openapi.json` · counters at `GET /v1/metrics`.
 
 **Verify-then-Act:** `POST /v1/gate {"action":"publish","claim":"..."}` (or `claim_digest`) → `ALLOW` / `DENY` / `REQUIRE_RECEIPT` from the local receipt store (non-flagged, digest-intact receipts only). Read-only, no signing.
+
+## Offline disclosure check (no server, no trust in the coordinator)
+
+```bash
+python3 -m aegis_miner.offline_verify disclosure.json --card proof_card.json
+```
+
+Auto-detects a single claim disclosure, a disclosure set, or a compact multiproof. The proof card
+(`GET /v1/receipts/{id}/proof`) pins `claims_root`, `claim_count` and `receipt_id`; any mismatch fails closed.
+Exit 0 only when the proof verifies against pinned values (`--allow-untrusted` accepts the embedded root).
