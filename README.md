@@ -57,8 +57,11 @@ No private keys or seeds in any repo (`.keys/`, `.env` gitignored). Never share 
 - `AEGIS_RECEIPT_HMAC=<secret>`: coordinator adds `mac` (HMAC-SHA256 over the receipt digest); `/v1/gate` and `/v1/gate/batch` return **DENY** for receipts with a missing or bad MAC. Unset = no MAC required. The secret is never logged or returned.
 - Claims are normalized with versioned `claim_norm` v2 (NFKC, smart quotes/dashes → ASCII, zero-width stripped). The gate matches v1 and v2 digests for back-compat.
 
-## Proof Credits → AGIS (pov-r/credit-settle/1)
-Proof Credits are non-transferable work receipts. They auto-settle only against the period's Reservoir fee inflow:
-`rate = fee_inflow_agis / max(1, credits_earned_this_period)`, capped by the Reservoir balance. More paid verifies →
-better rate; credits with no fees behind them settle at zero. Settling consumes receipt-backed credits once and emits
-an Ed25519-signed AGIS claim voucher (`miner/aegis_miner/credit_settle.py`). Library only; no mint.
+## Proof Credits → AGIS (pov-r/credit-settle/1, job-scoped)
+In plain words: **AGIS is only paid out of a real customer's payment for one specific verification.** When a job is
+paid, its fee splits 70% miners / 20% Reservoir / 5% treasury / 5% burn; the 70% is shared only among the miners who
+did work on *that* receipt, in proportion to the credits they earned on it. Free/demo verifies still give Proof Credits,
+but those are reputation only (non-transferable, never AGIS). There is no shared period pool, so nobody's pay can be
+diluted by other jobs. Settling uses up that miner's credits on that receipt once and returns an Ed25519-signed AGIS
+claim voucher bound to miner + receipt + job fee + amount; tampering, double settle, or paying more than the job's
+miner share all fail. (`miner/aegis_miner/credit_settle.py`; library only, no mint.)
