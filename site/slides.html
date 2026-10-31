@@ -1,0 +1,28 @@
+<!doctype html><meta charset=utf-8><title>AegisAI PoV-R</title><style>body{margin:0;font-family:sans-serif;background:#060e1c;color:#e2e8f0}section{min-height:100vh;box-sizing:border-box;padding:8vh 10vw;border-bottom:1px solid #22d3ee33;font-size:1.6em}h1,h2{color:#f5c451}pre{color:#22d3ee;font-size:.7em}</style><section><h1>AegisAI — PoV-R</h1>
+<p>Proof-of-Verification on Solana · Encode Solana Hackathon 2026 mid-checkpoint</p></section><section><h2>1. Problem</h2>
+<li>AI output is everywhere; fake citations and wrong numbers are common.</li>
+<li>No cheap way to *prove* an AI answer was checked. Centralized checking is costly and opaque.</li></section><section><h2>2. PoV-R</h2>
+<li>Split AI text → micro-claims → small verification tasks for any low-power device.</li>
+<li>Verdict per claim: TRUE / FALSE / UNSURE + receipt ID.</li>
+<li>Correct votes earn non-transferable <b>Proof Credits</b>; canaries catch cheaters.</li>
+<li>Reservoir: credits → AGIS only against real fees paid.</li></section><section><h2>3. Proof-of-Source</h2>
+<li>One method inside PoV: fetch the cited URL, fingerprint the page, check the quote exists.</li>
+<li>Dead / invalid source → FALSE. Quote found → TRUE. Not reachable/ambiguous → UNSURE.</li>
+<li>Plus arithmetic/rule checks and calibration canaries.</li></section><section><h2>4. Demo</h2>
+<li>https://bold-thistle-3z5f.here.now/verify.html</li>
+<li>3 buttons: Fake citation · Wrong math · Real quote → per-claim verdicts + receipt + credits.</li></section><section><h2>5. Architecture</h2>
+<pre>
+Browser / client ──► verify.html (in-browser engine)
+        │
+        └─► Miner/coordinator  POST /v1/verify
+              ├─ claim splitter
+              ├─ methods: arithmetic · Proof-of-Source fetch · canaries
+              ├─ Proof Credits ledger (off-chain now)
+              └─ solana_submit (memo receipts, devnet — next)
+</pre></section><section><h2>6. Token — Option A</h2>
+<li>AGIS: 1B hard cap, 40% Reservoir, mint authority revoked after genesis.</li>
+<li>Convert caps: ≤70% of epoch fees, ≤0.5% of Reservoir per epoch.</li>
+<li><b>No mint now</b> — tech and product first; token after audited program + liquidity.</li></section><section><h2>7. Next / Ask</h2>
+<li>Next: devnet Proof Credits program, on-chain receipts, verifier SDK, first pilot clients.</li>
+<li>Later layer: PoV on RWA documents (AI summaries of NAV/filings checked against sources).</li>
+<li>Ask: Solana mentorship, feedback from AI/infra teams, pilot users with real verification needs.</li></section>
