@@ -11,7 +11,7 @@ def test_split_and_url_quote():
     assert cs[1]["url"] == "https://solana.com/docs" and cs[1]["quote"] == "Solana uses proof of history"
 
 def test_source_votes():
-    c = {"text": "x", "url": "http://e", "quote": "Hello  World"}
+    c = {"text": "x", "url": "https://e", "quote": "Hello  World"}
     assert verify.check_claim(c, fetcher=lambda u: "say hello world now")["vote"] == "TRUE"
     r = verify.check_claim(c, fetcher=lambda u: "nothing here"); assert r["vote"] == "FALSE" and len(r["source_hash"]) == 64
     def boom(u): raise OSError("down")
@@ -42,10 +42,10 @@ def test_list_split_and_url_dots():
     assert cs[2]["url"] == "https://example.com/a.b" and len(cs) == 4
 
 def test_url_only():
-    r = verify.check_claim({"text": "see https://e", "url": "http://e"}, page_fetcher=lambda u: ("Example Domain", "body"))
+    r = verify.check_claim({"text": "see https://e", "url": "https://e"}, page_fetcher=lambda u: ("Example Domain", "body"))
     assert r["vote"] == "UNSURE" and r["note"] == "no quote to match" and r["page_title"] == "Example Domain" and len(r["source_hash"]) == 64
     def boom(u): raise OSError("dns")
-    assert verify.check_claim({"text": "see", "url": "http://e"}, page_fetcher=boom)["vote"] == "FALSE"
+    assert verify.check_claim({"text": "see", "url": "https://e"}, page_fetcher=boom)["vote"] == "FALSE"
 
 def test_canary():
     c = verify.make_canary("x"); c.update(verify.check_claim(c))
@@ -73,7 +73,7 @@ def test_near_quote():
 
 def test_ssrf_guard():
     import pytest
-    with pytest.raises(ValueError): verify.fetch_page("http://127.0.0.1:1/")
+    with pytest.raises(ValueError): verify.fetch_page("https://127.0.0.1:1/")
     with pytest.raises(ValueError): verify.fetch_page("file:///etc/passwd")
 
 

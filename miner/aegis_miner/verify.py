@@ -70,17 +70,72 @@ def _guard_url(url):
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
             raise ValueError("refusing non-public host")
 
-def fetch_page(url, timeout=8):
-    """Returns (title, normalized_text)."""
-    _guard_url(url)
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        raw = r.read(2_000_000).decode(r.headers.get_content_charset() or "utf-8", "replace")
-    import html
+MAX_REDIRECTS = 5
+MULTI_TLD = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.jp", "co.nz", "com.br", "co.in", "github.io", "here.now"}
+
+class CitationPolicyError(ValueError):
+    """Citation refused by Proof-of-Source policy (scheme, downgrade, cross-site redirect)."""
+
+def site_of(host):
+    """Naive registrable domain (eTLD+1) without external PSL download."""
+    labels = (host or "").lower().rstrip(".").split(".")
+    if len(labels) >= 3 and ".".join(labels[-2:]) in MULTI_TLD: return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+def citation_policy(url):
+    """HTTPS-only citations. Set AEGIS_ALLOW_HTTP=1 only for local dev."""
+    import urllib.parse
+    sch = urllib.parse.urlsplit(url).scheme.lower()
+    if sch == "https": return
+    if sch == "http" and os.environ.get("AEGIS_ALLOW_HTTP") == "1": return
+    raise CitationPolicyError("citation must be https:// (got %s)" % (sch or "none"))
+
+def redirect_verdict(chain):
+    """Inspect a redirect chain [url0, url1, ...]. Returns (refuse_reason|None, flags)."""
+    import urllib.parse
+    flags = []
+    for a, b in zip(chain, chain[1:]):
+        ua, ub = urllib.parse.urlsplit(a), urllib.parse.urlsplit(b)
+        if ua.scheme == "https" and ub.scheme != "https": return "https->http downgrade redirect", flags
+        if ua.scheme == "http" and ub.scheme == "https": flags.append("http_to_https_upgrade")
+        if site_of(ua.hostname) != site_of(ub.hostname): return "cross-domain redirect %s -> %s" % (ua.hostname, ub.hostname), flags
+        if ua.hostname != ub.hostname: flags.append("same_site_host_change")
+    if len(chain) - 1 > MAX_REDIRECTS: return "too many redirects", flags
+    return None, flags
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k): return None
+
+def fetch_page(url, timeout=8, opener=None):
+    """Returns (title, normalized_text, meta). Follows redirects manually: every hop is SSRF-guarded,
+    https-only, same-site; meta carries final_url + redirect_chain for the receipt fingerprint."""
+    import html, urllib.parse, urllib.error
+    citation_policy(url)
+    opener = opener or urllib.request.build_opener(_NoRedirect)
+    chain, cur = [url], url
+    while True:
+        _guard_url(cur)
+        try:
+            r = opener.open(urllib.request.Request(cur, headers={"User-Agent": UA}), timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
+                nxt = urllib.parse.urljoin(cur, e.headers["Location"]); chain.append(nxt)
+                bad, _ = redirect_verdict(chain)
+                if bad: raise CitationPolicyError(bad)
+                cur = nxt; continue
+            raise
+        with r:
+            raw = r.read(2_000_000).decode(r.headers.get_content_charset() or "utf-8", "replace")
+        break
+    _, flags = redirect_verdict(chain)
     t = TITLE_RE.search(raw)
-    return (norm(html.unescape(t.group(1)))[:200] if t else ""), norm(_html_text(raw))
+    meta = {"final_url": cur, "redirect_chain": chain, "redirect_flags": flags}
+    return (norm(html.unescape(t.group(1)))[:200] if t else ""), norm(_html_text(raw)), meta
 
 def fetch(url, timeout=8): return fetch_page(url, timeout)[1]
+
+def _unpack(res):
+    return (res[0], res[1], res[2] if len(res) > 2 else {})
 
 STOP = set("""a an the and or but of to in on at for with by from as is are was were be been being this that these those it its
 which who whom whose what when where how than then so such per via into over under about after before also not no
@@ -165,10 +220,15 @@ def support_check(claim_text, body):
     if best_flip and best >= 0.7: r["polarity"] = "opposite"
     return r
 
-def _fingerprint(url, title, body):
+def _fingerprint(url, title, body, meta=None):
     import time
-    return {"source_hash": hashlib.sha256(body[:50_000].encode()).hexdigest(), "page_title": title,
-            "content_chars": len(body), "fetched_at": int(time.time()), "source_url": url}
+    meta = meta or {}
+    final = meta.get("final_url", url)
+    fp = {"source_hash": hashlib.sha256(body[:50_000].encode()).hexdigest(), "page_title": title,
+          "content_chars": len(body), "fetched_at": int(time.time()), "source_url": url, "final_url": final,
+          "redirect_chain": meta.get("redirect_chain", [url]), "redirect_flags": meta.get("redirect_flags", [])}
+    fp["url_fingerprint"] = hashlib.sha256((url + "\n" + final + "\n" + fp["source_hash"]).encode()).hexdigest()[:32]
+    return fp
 
 SUPPORT_VOTE = {"SUPPORTED": ("TRUE", 0.8), "CONTRADICTED": ("FALSE", 0.75), "NOT_FOUND": ("FALSE", 0.7),
                 "PARTIAL": ("UNSURE", 0.5), "NO_CONTENT": ("UNSURE", 0.5)}
@@ -176,10 +236,13 @@ SUPPORT_VOTE = {"SUPPORTED": ("TRUE", 0.8), "CONTRADICTED": ("FALSE", 0.75), "NO
 def check_url_only(url, page_fetcher=fetch_page, claim_text=""):
     """URL cited without a quote: prove the page exists, fingerprint it, then check the claim's
     assertion against the retrieved text (Proof-of-Source support check)."""
-    try: title, body = page_fetcher(url)
+    try: citation_policy(url); title, body, meta = _unpack(page_fetcher(url))
+    except CitationPolicyError as e:
+        return {"vote": "UNSURE", "confidence": 0.0, "method": "source", "policy": "refused", "error": str(e)[:120]}
     except Exception as e:
         return {"vote": "FALSE", "confidence": 0.7, "method": "source", "error": "cited URL unreachable: " + str(e)[:100]}
-    r = {"method": "source", **_fingerprint(url, title, body)}
+    r = {"method": "source", **_fingerprint(url, title, body, meta)}
+    if r["redirect_flags"]: r["policy"] = "flagged"
     core = claim_core(claim_text)
     if not _terms(core):
         return dict(r, vote="UNSURE", confidence=0.5, note="no quote to match", support={"verdict": "NO_CONTENT", "support": 0.0})
@@ -205,7 +268,9 @@ def canary_ok(claims, client_votes=None):
 
 def check_source(url, quote, fetcher=fetch):
     """Quoted citation: exact (normalized) match, else fuzzy best-passage match (>=0.9 term overlap)."""
-    try: body = fetcher(url)
+    try: citation_policy(url); body = fetcher(url)
+    except CitationPolicyError as e:
+        return {"vote": "UNSURE", "confidence": 0.0, "method": "source", "policy": "refused", "error": str(e)[:120]}
     except Exception as e:
         return {"vote": "UNSURE", "confidence": 0.0, "method": "source", "error": str(e)[:120]}
     h = hashlib.sha256(body[:50_000].encode()).hexdigest()
