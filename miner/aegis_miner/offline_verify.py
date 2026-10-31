@@ -97,6 +97,7 @@ def main(argv=None):
     p.add_argument("--revocation", action="append", help="self-signed key revocation JSON (pov-r/key-revoke/1); repeatable")
     p.add_argument("--rotation", action="append", help="dual-signed key rotation JSON (pov-r/key-rotate/1); repeatable, followed from --pubkey")
     p.add_argument("--bundle", help="signed trust bundle JSON (pov-r/trust-bundle/1); its rotations/revocations are used, needs --pubkey")
+    p.add_argument("--equivocation", action="append", help="equivocation proof JSON (pov-r/equivocation/1); repeatable; a proven-equivocating bundle signer is rejected")
     p.add_argument("--now", type=float, help="unix time for bundle expiry check")
     p.add_argument("--min-seq", type=int, help="last accepted bundle seq (rollback protection)")
     p.add_argument("--allow-untrusted", action="store_true", help="exit 0 on ok even without pinned root/leaf_count")
@@ -106,12 +107,13 @@ def main(argv=None):
         revs = [_load(x) for x in a.revocation or []]
         rots = [_load(x) for x in a.rotation or []]
         bundle = _load(a.bundle) if a.bundle else None
+        eqs = [_load(x) for x in a.equivocation or []]
     except (OSError, ValueError) as e:
         print(json.dumps({"ok": False, "trusted": False, "reason": f"cannot read input: {e}"})); return 2
     if bundle is not None:
         if not a.pubkey:
             print(json.dumps({"ok": False, "trusted": False, "reason": "--bundle needs --pubkey"})); return 1
-        b = ca.check_bundle(bundle, a.pubkey, a.now, a.min_seq)
+        b = ca.check_bundle(bundle, a.pubkey, a.now, a.min_seq, eqs)
         if not b["ok"]:
             print(json.dumps({"ok": False, "trusted": False, "reason": f"trust bundle: {b['reason']}"})); return 1
         rots, revs = rots + b["rotations"], revs + b["revocations"]

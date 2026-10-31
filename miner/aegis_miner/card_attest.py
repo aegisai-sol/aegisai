@@ -234,11 +234,12 @@ def make_bundle(seed_hex, seq, issued_at, expires_at, rotations=(), revocations=
     return {"scheme": BUNDLE_SCHEME, "signer": pk, "seq": seq, "issued_at": issued_at, "expires_at": expires_at,
             "rotations": rots, "revocations": revs, "sig": sig}
 
-def check_bundle(bundle, trusted_pubkeys, now=None, min_seq=None):
+def check_bundle(bundle, trusted_pubkeys, now=None, min_seq=None, equivocations=None):
     """Verify a pov-r/trust-bundle/1 against pinned root keys. The signer must be a key reachable from the pins via
     the bundle's own rotations, valid at issued_at, and not revoked (compromised at all, or retired at/before
     issued_at). now: reject if expired or issued in the future; min_seq: last seq this verifier accepted (rollback
-    -> reject; equal seq is a re-fetch and OK). Returns {ok, reason, seq, signer, rotations, revocations}; never raises."""
+    -> reject; equal seq is a re-fetch and OK). equivocations: pov-r/equivocation/1 proofs; a bundle whose signer is
+    proven to have equivocated is rejected (its snapshots can no longer be trusted to be the one global view). Returns {ok, reason, seq, signer, rotations, revocations}; never raises."""
     try:
         if not isinstance(bundle, dict) or bundle.get("scheme") != BUNDLE_SCHEME: return {"ok": False, "reason": "not a trust bundle"}
         pk, seq, ia, ea, sig = (bundle.get(k) for k in ("signer", "seq", "issued_at", "expires_at", "sig"))
@@ -263,7 +264,42 @@ def check_bundle(bundle, trusted_pubkeys, now=None, min_seq=None):
             if now >= ea: return {"ok": False, "reason": "bundle expired"}
             if ia > now: return {"ok": False, "reason": "bundle issued in the future"}
         if min_seq is not None and (not _int(min_seq) or seq < min_seq): return {"ok": False, "reason": "bundle rollback (seq < last seen)"}
+        if equivocations:
+            for e in list(equivocations)[:MAX_BUNDLE_STATEMENTS]:
+                ev = check_equivocation(e, trusted_pubkeys)
+                if ev.get("ok") and ev.get("signer") == pk: return {"ok": False, "reason": "bundle signer equivocated", "signer": pk}
         return {"ok": True, "reason": None, "seq": seq, "signer": pk,
                 "rotations": [r for r in rots if check_rotation(r)], "revocations": [r for r in revs if check_revocation(r)]}
+    except Exception as e:
+        return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
+
+EQUIVOCATION_SCHEME = "pov-r/equivocation/1"
+
+def make_equivocation(bundle_a, bundle_b):
+    """Package two conflicting signed bundles as a portable fraud proof (gossip it; anyone re-verifies offline)."""
+    return {"scheme": EQUIVOCATION_SCHEME, "a": bundle_a, "b": bundle_b}
+
+def check_equivocation(proof, trusted_pubkeys):
+    """Prove a coordinator showed different verifiers different trust snapshots (split view, e.g. hiding a
+    'compromised' revocation from one audience). check_bundle's rollback guard accepts an equal seq as a re-fetch,
+    so a split view is only visible by comparing bundles across verifiers. Proven iff both bundles verify against
+    the pins (expiry ignored: old evidence stays evidence), share a signer, and either carry the same seq with
+    different signed content ('same-seq fork') or order seq and issued_at oppositely ('non-monotonic seq').
+    Returns {ok, reason, signer, seq, kind}; ok=True means equivocation PROVEN. Never raises."""
+    try:
+        if not isinstance(proof, dict) or proof.get("scheme") != EQUIVOCATION_SCHEME: return {"ok": False, "reason": "not an equivocation proof"}
+        a, b = proof.get("a"), proof.get("b")
+        ra, rb = check_bundle(a, trusted_pubkeys), check_bundle(b, trusted_pubkeys)
+        if not ra.get("ok") or not rb.get("ok"): return {"ok": False, "reason": "bundle invalid: " + str(ra.get("reason") or rb.get("reason"))}
+        if ra["signer"] != rb["signer"]: return {"ok": False, "reason": "different signers"}
+        ma = bundle_message(a["signer"], a["seq"], a["issued_at"], a["expires_at"], a["rotations"], a["revocations"])
+        mb = bundle_message(b["signer"], b["seq"], b["issued_at"], b["expires_at"], b["rotations"], b["revocations"])
+        base = {"signer": ra["signer"]}
+        if a["seq"] == b["seq"]:
+            if ma == mb: return {"ok": False, "reason": "same bundle (re-fetch)", **base, "seq": a["seq"]}
+            return {"ok": True, "reason": None, **base, "seq": a["seq"], "kind": "same-seq fork"}
+        if (a["seq"] - b["seq"]) * (a["issued_at"] - b["issued_at"]) < 0:
+            return {"ok": True, "reason": None, **base, "seq": min(a["seq"], b["seq"]), "kind": "non-monotonic seq"}
+        return {"ok": False, "reason": "consistent history", **base}
     except Exception as e:
         return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
