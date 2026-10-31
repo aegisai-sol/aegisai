@@ -9,6 +9,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 VOTES, NODES = [], {}
 PRICE = [0.00042]
 for _ in range(47): PRICE.append(round(PRICE[-1] * (1 + random.uniform(-.03, .032)), 6))
+def fee_preview(b, reservoir):
+    fee = int(b.get("fee_micro", 1000000))
+    if not 0 <= fee <= 10**15: raise ValueError("fee_micro out of range")
+    votes = b.get("votes")
+    c = b.get("consensus")
+    if votes is None and c:
+        votes = {n["node"]: 1 for n in c.get("per_node", []) if c.get("valid") and n.get("vote") == c.get("consensus_vote")}
+    votes = {str(k): int(v) for k, v in (votes or {}).items()}
+    r = reservoir.split_fee(fee, votes, bool(b.get("flagged")))
+    r.update(split_bps=reservoir.SPLIT_BPS, source="coordinator", note="Off-chain preview only; no token minted, no payouts live.")
+    return r
 class H(BaseHTTPRequestHandler):
     def _send(self, code, obj):
         b = json.dumps(obj).encode(); self.send_response(code)
@@ -40,6 +51,7 @@ class H(BaseHTTPRequestHandler):
         else: self._send(404, {"error": "not found"})
     def do_POST(self):
         if self.path == "/v1/verify": return self._verify()
+        if self.path == "/v1/fee-preview": return self._fee_preview()
         if self.path in ("/v1/fetch-check", "/v1/consensus"):
             from . import verify as _v, consensus as _c
             try: b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)))); url, claim = b["url"], b.get("claim", "")
@@ -78,6 +90,13 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: rec["onchain"] = f"ANCHOR_FAILED: {type(e).__name__}"
         os.makedirs(RECEIPTS, exist_ok=True); json.dump(rec, open(os.path.join(RECEIPTS, rid + ".json"), "w"))
         self._send(200, rec)
+    def _fee_preview(self):
+        """Fee-split preview (mirrors reservoir.split_fee). Body: {fee_micro, votes:{node:weight}, flagged} or {fee_micro, consensus:{valid, consensus_vote, per_node:[...]}, flagged}."""
+        from . import reservoir
+        try:
+            b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            return self._send(200, fee_preview(b, reservoir))
+        except Exception as e: return self._send(400, {"error": str(e)[:200]})
     def log_message(self, *a): pass
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8787

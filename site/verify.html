@@ -37,16 +37,19 @@ $('go').onclick = async () => {
 <p class="text-xs text-slate-500 mt-2">Mirrors <code>consensus.py</code> and <code>reservoir.py</code> in the open-source miner. Off-chain accounting stub — no token minted, no payouts live.</p></section>
 <script type="module">
 import { splitFee, consensusStatus, SCENARIOS } from './js/receipt-demo.js';
+import { COORDINATOR } from './js/verify-client.js';
 const $ = id => document.getElementById(id); let cur = 'valid';
 const colr = { VALID: 'text-emerald-400', VALID_VERDICT: 'text-cyan', HASH_ONLY: 'text-gold', NO_CONSENSUS: 'text-rose-400' };
-function render() {
+async function render() {
   const c = consensusStatus(SCENARIOS[cur]); const fail = $('canfail').checked;
   $('qq').textContent = c.quorum; $('qn').textContent = c.nodes; $('qs').textContent = c.status; $('qs').className = 'font-mono ' + colr[c.status];
   $('qt').innerHTML = c.per_node.map(n => `<tr><td>${n.node}</td><td>${n.vote}${n.error ? ' ('+n.error+')' : ''}</td><td class="font-mono">${n.source_hash || '–'}</td></tr>`).join('');
   const votes = c.valid ? Object.fromEntries(c.per_node.filter(n => n.vote === c.consensus_vote).map(n => [n.node, 1])) : {};
-  const f = splitFee(1000000, votes, fail);
+  let f = splitFee(1000000, votes, fail), src = 'in-browser mirror';
+  if (COORDINATOR) try { const r = await fetch(COORDINATOR.replace(/\/$/, '') + '/v1/fee-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fee_micro: 1000000, votes, flagged: fail }) }); if (r.ok) { f = await r.json(); src = 'coordinator /v1/fee-preview'; } } catch (e) {}
   $('fs').innerHTML = Object.entries(f.parts).map(([k, v]) => `<div class="rounded-lg bg-deep/60 border border-cyan/10 p-2"><div class="text-slate-400 text-[11px] capitalize">${k}</div><b class="${k==='reservoir'?'text-gold':''}">${(v/1e4).toFixed(1)}%</b></div>`).join('');
   $('fp').textContent = fail ? 'Canary failed → receipt flagged, miners earn 0; their 70% is routed to the Reservoir.' : Object.keys(f.payouts).length ? 'Miner payouts (pro-rata to agreeing votes): ' + Object.entries(f.payouts).map(([n, v]) => n + ' ' + v.toLocaleString()).join(' · ') : 'No valid consensus → no miner payout; share held in Reservoir.';
+  $('fp').textContent += ' [split computed by: ' + src + ']';
 }
 document.querySelectorAll('[data-sc]').forEach(b => b.onclick = () => { cur = b.dataset.sc; render(); }); $('canfail').onchange = render; render();
 </script>
