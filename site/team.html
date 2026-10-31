@@ -1,0 +1,10 @@
+<!doctype html><html lang="en" class="text-slate-100"><head><title>AGIS Ops · Team</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><link rel="icon" href="assets/agis-logo.png"><script src="https://cdn.tailwindcss.com"></script><script>tailwind.config={theme:{extend:{colors:{navy:"#0a1628",cyan:"#22d3ee",gold:"#f5c451"}}}}</script><style>body{background:#05090f}.panel{background:rgba(12,24,44,.72);border:1px solid rgba(34,211,238,.14);border-radius:14px}.k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#64748b}</style></head><body>
+<div class="bg-amber-500/15 text-amber-200 text-xs text-center py-2 font-semibold">🔒 Internal ops — do not share · observation only, no keys on this page</div>
+<nav class="max-w-6xl mx-auto px-5 py-5 flex items-center gap-3"><img src="assets/agis-logo.png" class="w-8 h-8 rounded-full"><b>AGIS Ops <span class="text-gold">· Team</span></b><span class="ml-auto text-xs font-mono text-slate-400">updated <b id="upd" class="text-slate-200">…</b> · auto 30s</span></nav>
+<main class="max-w-6xl mx-auto px-5 pb-10 space-y-4">
+<section class="panel p-5"><div class="k mb-2">1 · System health</div><ul id="sys" class="text-sm font-mono space-y-1">…</ul></section>
+<section class="panel p-5"><div class="k mb-3">2 · Token on-chain</div><div id="tok" class="grid md:grid-cols-3 gap-4">…</div></section>
+<div class="grid md:grid-cols-2 gap-4"><section id="team" class="panel p-5">Team 10% …</section><section id="eco" class="panel p-5">Eco 5% …</section></div>
+<section class="panel p-5"><div class="k mb-2">5 · Blockchain</div><ul id="chain" class="text-sm font-mono space-y-1">…</ul></section>
+<p class="text-[11px] text-slate-500">Alerts fire if a wallet drops below expected allocation (Team 1B, Eco 500M). Sparklines use this browser's history.</p></main>
+<script type="module">import {run} from './js/team-ops.js';run();</script></body></html>

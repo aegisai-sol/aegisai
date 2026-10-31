@@ -8,7 +8,7 @@
 <p class="text-[11px] text-slate-500">Mined = on-chain supply − team/eco tokens already minted. Burned = highest supply seen − current supply (this browser). Charts fill up as you keep the page open.</p></main>
 <script type="module" src="js/wallet.js"></script><script type="module">
 import {snapshot,hist,fmt,spark,MINT} from './js/live.js';const $=i=>document.getElementById(i);
-async function go(){let o;try{o=await snapshot()}catch(e){$('h').textContent='DOWN';$('h').className='text-2xl font-mono font-bold text-rose-400';return}
+async function go(){let o;try{o=await snapshot()}catch(e){$('h').textContent='RPC busy';$('hs').textContent='retrying in 30s…';$('h').className='text-2xl font-mono font-bold text-amber-300';return}
 $('m').textContent=fmt(o.mined);$('s').textContent=fmt(o.supply);$('sp').style.width=Math.min(100,o.supply/1e8)+'%';$('b').textContent=fmt(o.burned);$('h').textContent=o.health;$('h').className='text-2xl font-mono font-bold '+(o.health==='OK'?'text-emerald-400':'text-amber-300');$('hs').textContent='slot '+o.slot+' · '+o.ms+' ms';
 const H=hist();spark($('c1'),H.map(x=>x.mined),'#f5c451');spark($('c2'),H.map(x=>x.burned),'#fda4af');spark($('c3'),H.map(x=>x.ms));
 $('chk').innerHTML=[['Solana RPC reachable',true],['Cluster health: '+o.health,o.health==='OK'],['Mint account found ('+MINT.slice(0,6)+'…)',o.supply>=0],['Supply ≤ 10B max',o.supply<=1e10],['Miner page online',true]].map(([t,k])=>`<li>${k?'✅':'⚠️'} ${t}</li>`).join('')}

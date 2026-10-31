@@ -31,7 +31,11 @@ fs.mkdirSync('./deployments', { recursive: true });
 const ledger = fs.existsSync(LEDGER) ? JSON.parse(fs.readFileSync(LEDGER, 'utf8')) : { seen: {}, day: {} };
 const save = () => fs.writeFileSync(LEDGER, JSON.stringify(ledger, null, 1));
 const conn = connection();
-const payer = loadKeypair();
+let payer = null;
+const getPayer = () => {
+  if (!payer) payer = loadKeypair();
+  return payer;
+};
 const hits = new Map(); // ip/wallet -> [timestamps]
 const limited = (k, n, ms) => { const now = Date.now(), a = (hits.get(k) || []).filter(t => now - t < ms); a.push(now); hits.set(k, a); return a.length > n; };
 let queue = Promise.resolve(); // serialize mints
@@ -55,11 +59,11 @@ async function handle(c) {
   if (used + amt > DAILY_CAP) amt = DAILY_CAP - used;
   if (gused + amt > GLOBAL_DAILY_CAP) amt = GLOBAL_DAILY_CAP - gused;
   if (amt <= 0n) throw 'daily cap reached';
-  if ((await conn.getBalance(payer.publicKey)) < MIN_SOL_LAMPORTS) throw 'payout wallet low on SOL, try later';
+  if ((await conn.getBalance(getPayer().publicKey)) < MIN_SOL_LAMPORTS) throw 'payout wallet low on SOL, try later';
   ledger.seen[dg] = 'pending'; save();
   try {
-    const ata = await getOrCreateAssociatedTokenAccount(conn, payer, MINT, new PublicKey(w));
-    const tx = await mintTo(conn, payer, MINT, ata.address, payer, amt);
+    const ata = await getOrCreateAssociatedTokenAccount(conn, getPayer(), MINT, new PublicKey(w));
+    const tx = await mintTo(conn, getPayer(), MINT, ata.address, getPayer(), amt);
     ledger.seen[dg] = tx; ledger.seen['sig:' + c.sig] = tx;
     ledger.day[k] = String(used + amt); ledger.day[gk] = String(gused + amt); save();
     console.log(new Date().toISOString(), 'minted', w, Number(amt) / 10 ** DECIMALS, tx);
@@ -75,6 +79,11 @@ http.createServer((req, res) => {
   if (req.method === 'OPTIONS') return out(204, {});
   const url = req.url.split('?')[0];
   if (req.method === 'GET' && (url === '/' || url === '/api/health')) return out(200, { ok: true, mint: MINT.toBase58(), live: true });
+  if (req.method === 'GET' && url === '/api/supply') {
+    return Promise.all([conn.getTokenSupply(MINT), conn.getSlot().catch(() => null)])
+      .then(([s, slot]) => out(200, { ok: true, mint: MINT.toBase58(), supply: s.value.amount, uiAmount: s.value.uiAmount, uiAmountString: s.value.uiAmountString, decimals: s.value.decimals, slot }))
+      .catch(e => out(502, { ok: false, error: String(e) }));
+  }
   if (req.method !== 'POST' || url !== '/api/claim') return out(404, { ok: false, error: 'not found' });
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0].trim();
   if (limited('ip:' + ip, 10, 60e3)) return out(429, { ok: false, error: 'rate limited' });
@@ -84,5 +93,5 @@ http.createServer((req, res) => {
     if (c && typeof c.wallet === 'string' && limited('w:' + c.wallet, 5, 60e3)) return out(429, { ok: false, error: 'rate limited' });
     queue = queue.then(() => handle(c)).then(r => out(200, r), e => out(400, { ok: false, error: String(e) }));
   });
-}).listen(PORT, () => console.log('claim server on', PORT, 'payer', payer.publicKey.toBase58()));
+}).listen(PORT, '0.0.0.0', () => console.log('claim server on', PORT, 'payer', getPayer().publicKey.toBase58()));
 
