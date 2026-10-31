@@ -9,3 +9,10 @@
 5. **Larger CEX** — Bitget, BloFin (futures-focused; usually lists after strong spot volume elsewhere), KuCoin, OKX: require audit, legal opinion, significant volume/community. Apply only after steps 1–4.
 
 Never pay "listing agents" who promise guaranteed listings — common scam.
+
+## Status — 2026-10-31 13:25 (Europe/Sofia)
+- **Claim API:** server is ready (rate limits 10/min per IP, 5/min per wallet, 100 AGIS/day per wallet cap, `/api/health`). Public HTTPS host pending (Railway: `token/Dockerfile`, secret `MINT_AUTH_JSON`, `MAINNET=1`, volume on `/app/deployments` for the ledger). Miner `agis-claim-url` stays empty → Claim mint OFF until set.
+- **LP:** payout wallet holds ~0.135 SOL. Raydium CPMM needs ~0.15–0.2 SOL in fees/rent **plus** SOL to seed the pool. Minimum sensible: **~0.5–1 SOL extra** (≈0.4–0.9 SOL short). Team/eco wallets are not touched.
+- **DexScreener:** listed automatically once a Raydium/Meteora pool exists. After that, "Enhanced Token Info" (logo, socials) costs ~$299 at marketplace.dexscreener.com.
+- **Jupiter:** routes to the pool automatically after it's indexed. Verification at catdetlist.jup.ag (needs metadata, socials, liquidity/volume).
+- **Checklist:** ✅ Metaplex metadata/logo · ✅ website/whitepaper · ⏳ X/Telegram links in metadata · ⏳ LP + lock/burn LP tokens · ⏳ DexScreener info · ⏳ Jupiter verify · ❌ audit.
