@@ -32,3 +32,13 @@ Status: Option A — **no AGIS mint**. Everything below runs today in off-chain 
 The coordinator can anchor each `/v1/verify` receipt digest as an SPL Memo on **devnet**:
 `AEGIS_ANCHOR_RECEIPTS=1 SOLANA_KEYPAIR=/path/devnet.json python3 -m aegis_miner.coordinator` (needs `pip install solders` + devnet SOL).
 Memo: `AGIS|PoV-R|<receipt_id>|<digest>`; tx sig stored in `rec.onchain.memo_tx`. Ignored when `MAINNET=1`. Never put keys in chat/repo.
+
+## Devnet anchoring — tested path (Oct 31)
+- Default **OFF**. `MAINNET=1` or any mainnet RPC is **refused** in code (phase 1 = devnet only).
+- `AEGIS_ANCHOR_DRYRUN=1` builds + signs the SPL Memo tx locally and never sends (returns `DRYRUN:<sig>`).
+- CI: `miner/tests/test_anchor.py` mocks RPC and uses an **ephemeral TEST-ONLY keypair** created in a pytest tmp dir (never on disk in repo).
+- Real devnet TX (manual, not yet done — box could not reach api.devnet.solana.com):
+  1. `solana-keygen new -o ~/aegis-devnet-TEST-ONLY.json` (throwaway, never the firm Phantom wallet)
+  2. `solana airdrop 1 <pubkey> -u devnet` or https://faucet.solana.com
+  3. `AEGIS_ANCHOR_RECEIPTS=1 SOLANA_KEYPAIR=~/aegis-devnet-TEST-ONLY.json python3 -m aegis_miner.coordinator`
+  4. POST /v1/verify → receipt `onchain.memo_tx` → check on explorer.solana.com/?cluster=devnet

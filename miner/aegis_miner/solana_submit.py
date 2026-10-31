@@ -15,8 +15,11 @@ def _rpc(url, method, params):
 class SolanaSubmitter:
     def __init__(self):
         from solders.keypair import Keypair
-        self.cluster = "mainnet-beta" if os.environ.get("MAINNET") == "1" else "devnet"
-        self.url = os.environ.get("SOLANA_RPC", RPCS[self.cluster])
+        if os.environ.get("MAINNET") == "1":
+            raise RuntimeError("mainnet anchoring disabled in PoV-R phase 1 (devnet only)")
+        self.cluster = "devnet"
+        self.url = os.environ.get("SOLANA_RPC", RPCS["devnet"])
+        if "mainnet" in self.url: raise RuntimeError("mainnet RPC refused")
         path = os.environ.get("SOLANA_KEYPAIR", "../aegisai-token/.keys/devnet.json")
         if not os.path.exists(path): raise FileNotFoundError(f"keypair not found: {path}")
         self.kp = Keypair.from_bytes(bytes(json.load(open(path))))
@@ -32,6 +35,10 @@ class SolanaSubmitter:
         return Transaction([self.kp], Message([ix], self.kp.pubkey()), Hash.from_string(blockhash))
 
     def submit(self, memo):
+        if len(memo.encode()) > 566: raise ValueError("memo too long")
+        if os.environ.get("AEGIS_ANCHOR_DRYRUN") == "1":  # build+sign, never send
+            tx = self.build(memo, "11111111111111111111111111111111")
+            return "DRYRUN:" + str(tx.signatures[0])
         bh = _rpc(self.url, "getLatestBlockhash", [{"commitment": "confirmed"}])["value"]["blockhash"]
         tx = self.build(memo, bh)
         return _rpc(self.url, "sendTransaction", [base64.b64encode(bytes(tx)).decode(), {"encoding": "base64"}])
