@@ -122,8 +122,7 @@ class H(BaseHTTPRequestHandler):
             peers = [p for p in os.environ.get("AEGIS_PEERS", "").split(",") if p.strip()]
             res = consensus.PEER_HEALTH.observe_pings(peers, consensus.ping_peers(peers, expect=(PROTOCOL_VERSION, CLAIM_SCHEMA)))
             consensus.attach_breakdowns(consensus.PEER_HEALTH, peers, res)
-            self._send(200, {"peers": res, "quorum": 2, "weighted_quorum": consensus.weighted_quorum_enabled(),
-                             "disagree_cap": consensus.PEER_HEALTH.disagree_cap})
+            self._send(200, {"peers": res, "quorum": 2, **consensus.ping_flags()})
         elif self.path == "/v1/openapi.json": self._send(200, OPENAPI)
         elif self.path == "/v1/metrics": self._send(200, dict(METRICS))
         elif self.path == "/api/votes": self._send(200, VOTES[-100:])

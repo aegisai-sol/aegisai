@@ -60,6 +60,12 @@ def consensus(url, claim_text, nodes, quorum=2, weights=None):
            "hash_agree": hash_n, "consensus_vote": top_vote if vote_ok else None, "vote_agree": vote_n,
            "per_node": [{k: r.get(k) for k in ("node", "vote", "source_hash", "error")} for r in results]}
     if weights is not None: rec.update(weighted=True, vote_weight=vote_weight, total_weight=total_weight)
+    # quorum_strength = agreeing weight / total weight over non-errored votes (unweighted: counts).
+    # In [0,1]; 0.0 when there are no usable votes or total weight is 0 (never divides by zero).
+    num, den = (vote_weight or 0.0, total_weight or 0.0) if weights is not None else (vote_n, sum(votes.values()))
+    rec["quorum_strength"] = round(num / den, 6) if den > 0 else 0.0
+    # errored: count of nodes that failed to answer (excluded from tallies; ids in per_node)
+    rec["errored"] = sum(1 for r in results if r.get("error"))
     rec["receipt_digest"] = hashlib.sha256(json.dumps({k: rec[k] for k in ("url", "claim", "status", "consensus_hash", "consensus_vote")}, sort_keys=True).encode()).hexdigest()
     return rec
 
@@ -302,6 +308,12 @@ def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node
     rec["peer_selection"] = info
     if w is not None: rec["weights_used"] = w  # audit: ids-only weights snapshot taken BEFORE this round's observations
     return rec
+
+def ping_flags(health=None, env=None):
+    """Flags reported by /v1/peers/ping alongside per-peer breakdowns."""
+    health = health or PEER_HEALTH
+    return {"weighted_quorum": weighted_quorum_enabled(env), "disagree_cap": health.disagree_cap,
+            "weight_floor": health.weight_floor}
 
 def attach_breakdowns(health, endpoints, results):
     """Add ids-only weight breakdown to ping results (no URLs; keyed by position)."""
