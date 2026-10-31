@@ -21,6 +21,9 @@ def fee_preview(b, reservoir):
     r.update(split_bps=reservoir.SPLIT_BPS, source="coordinator", note="Off-chain preview only; no token minted, no payouts live.")
     return r
 START = time.time()
+PROTOCOL_VERSION = "pov-r/1"  # bump on breaking receipt/claim schema change
+CLAIM_SCHEMA = 1
+
 def health():
     """Liveness + config summary. Never exposes peer URLs or keys, only counts."""
     peers = [p for p in os.environ.get("AEGIS_PEERS", "").split(",") if p.strip()]
@@ -28,7 +31,8 @@ def health():
             "citation_policy": "https-only" if os.environ.get("AEGIS_ALLOW_HTTP") != "1" else "http-allowed(dev)",
             "max_redirects": verify.MAX_REDIRECTS, "anchor": "devnet" if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" else "off",
             "token_mode": token_bridge.state_from_env().mode,
-            "peer_liveness": consensus.peer_liveness(peers)}
+            "peer_liveness": consensus.peer_liveness(peers),
+            "peer_health": consensus.PEER_HEALTH.summary(peers), "protocol_version": PROTOCOL_VERSION}
 def list_receipts(limit=20, offset=0):
     """Newest-first page of receipt summaries (id, mtime, status). No bodies, so pages stay small."""
     ids = sorted((f for f in (os.listdir(RECEIPTS) if os.path.isdir(RECEIPTS) else []) if f.endswith(".json")),
@@ -107,7 +111,7 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/v1/health": self._send(200, health())
         elif self.path == "/v1/peers/ping":
             peers = [p for p in os.environ.get("AEGIS_PEERS", "").split(",") if p.strip()]
-            self._send(200, {"peers": consensus.ping_peers(peers), "quorum": 2})
+            self._send(200, {"peers": consensus.PEER_HEALTH.observe_pings(peers, consensus.ping_peers(peers)), "quorum": 2})
         elif self.path == "/v1/openapi.json": self._send(200, OPENAPI)
         elif self.path == "/v1/metrics": self._send(200, dict(METRICS))
         elif self.path == "/api/votes": self._send(200, VOTES[-100:])
@@ -161,6 +165,7 @@ class H(BaseHTTPRequestHandler):
                "credits_awarded": n, "calibration": {"ok": ok, "failed": bad},
                "flagged": not ok, "reservoir_note": RESERVOIR_NOTE, "onchain": "PENDING (devnet memo later)"}
         rec["claim_norm"] = 2
+        rec["protocol_version"] = PROTOCOL_VERSION; rec["claim_schema"] = CLAIM_SCHEMA
         rec["digest"] = token_bridge.receipt_digest(rec)
         mac = token_bridge.receipt_mac(rec)  # AEGIS_RECEIPT_HMAC; secret never logged
         if mac: rec["mac"] = mac

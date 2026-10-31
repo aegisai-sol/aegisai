@@ -85,3 +85,42 @@ def peer_liveness(endpoints, now=_time.time, stale_s=300):
     """Cached summary for /v1/health (no network call)."""
     t = now(); live = sum(1 for e in endpoints if e in _LAST_OK and t - _LAST_OK[e] <= stale_s)
     return {"live": live, "known": len(endpoints), "stale_after_s": stale_s}
+
+
+# --- peer health hysteresis: dead after N consecutive fails, alive again after M consecutive oks ---
+class PeerHealth:
+    """Flap-resistant peer state. Starts 'alive'. Ids only (peer0..N); URLs never exposed."""
+    def __init__(self, fail_threshold=3, recover_threshold=2):
+        if fail_threshold < 1 or recover_threshold < 1: raise ValueError("thresholds must be >= 1")
+        self.n, self.m = int(fail_threshold), int(recover_threshold)
+        self._s = {}  # endpoint -> {"alive", "fails", "oks"}
+
+    def observe(self, endpoint, ok):
+        s = self._s.setdefault(endpoint, {"alive": True, "fails": 0, "oks": 0})
+        if ok:
+            s["oks"] += 1; s["fails"] = 0
+            if not s["alive"] and s["oks"] >= self.m: s["alive"] = True
+        else:
+            s["fails"] += 1; s["oks"] = 0
+            if s["alive"] and s["fails"] >= self.n: s["alive"] = False
+        return s["alive"]
+
+    def is_alive(self, endpoint): return self._s.get(endpoint, {"alive": True})["alive"]
+
+    def observe_pings(self, endpoints, results):
+        for e, r in zip(endpoints, results): r["alive"] = self.observe(e, r.get("ok"))
+        return results
+
+    def summary(self, endpoints):
+        alive = [e for e in endpoints if self.is_alive(e)]
+        return {"alive": len(alive), "dead": len(endpoints) - len(alive), "known": len(endpoints),
+                "fail_threshold": self.n, "recover_threshold": self.m}
+
+    def alive_endpoints(self, endpoints): return [e for e in endpoints if self.is_alive(e)]
+
+def _env_int(name, default):
+    import os
+    try: return max(1, int(os.environ.get(name, default)))
+    except ValueError: return default
+
+PEER_HEALTH = PeerHealth(_env_int("AEGIS_PEER_FAILS", 3), _env_int("AEGIS_PEER_RECOVERS", 2))
