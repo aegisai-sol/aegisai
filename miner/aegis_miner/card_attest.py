@@ -207,50 +207,61 @@ MAX_BUNDLE_STATEMENTS = 256
 
 def _canon(x): return json.dumps(x, sort_keys=True, separators=(",", ":"))
 
-def bundle_message(signer, seq, issued_at, expires_at, rotations, revocations):
+def bundle_message(signer, seq, issued_at, expires_at, rotations, revocations, retractions=None):
     core = {"signer": signer, "seq": seq, "issued_at": issued_at, "expires_at": expires_at,
             "rotations": sorted(_canon(r) for r in rotations), "revocations": sorted(_canon(r) for r in revocations)}
+    # Retractions are committed only when present, so pre-retraction bundles keep their exact signed bytes.
+    if retractions: core["retractions"] = sorted(_canon(r) for r in retractions)
     return BUNDLE_SCHEME.encode() + b"\n" + _canon(core).encode()
 
 def _int(x): return not isinstance(x, bool) and isinstance(x, int) and x >= 0
 
-def make_bundle(seed_hex, seq, issued_at, expires_at, rotations=(), revocations=()):
+def make_bundle(seed_hex, seq, issued_at, expires_at, rotations=(), revocations=(), retractions=()):
     """Signed, sequenced snapshot of every key-rotation and revocation statement the coordinator knows. Individual
     statements are self-authenticating, but a verifier can't tell whether one is being WITHHELD (e.g. a
     'compromised' revocation). A bundle closes that gap: a monotonic seq lets a verifier refuse rollback to an older
-    snapshot, and expires_at bounds how stale a replayed one can be. Statement order does not matter. Raises ValueError."""
+    snapshot, and expires_at bounds how stale a replayed one can be. retractions (pov-r/card-retract/1) ride the same
+    anti-withholding channel: a coordinator can't quietly keep a retracted card vouching for one audience without
+    signing a bundle that omits it (and a conflicting same-seq bundle is an equivocation proof). Statement order does
+    not matter. Raises ValueError."""
     ed, _ = _ed()
     if ed is None: raise ValueError("ed25519 unavailable (install cryptography)")
     if not _hexn(seed_hex, 64): raise ValueError("bad seed")
     if not _int(seq): raise ValueError("seq must be a non-negative int")
     if not _num(issued_at) or not _num(expires_at) or expires_at <= issued_at: raise ValueError("need 0 <= issued_at < expires_at")
-    rots, revs = list(rotations), list(revocations)
-    if len(rots) + len(revs) > MAX_BUNDLE_STATEMENTS: raise ValueError("too many statements")
-    if any(check_rotation(r) is None for r in rots) or any(check_revocation(r) is None for r in revs):
+    rots, revs, rets = list(rotations), list(revocations), list(retractions)
+    if len(rots) + len(revs) + len(rets) > MAX_BUNDLE_STATEMENTS: raise ValueError("too many statements")
+    if any(check_rotation(r) is None for r in rots) or any(check_revocation(r) is None for r in revs) \
+            or any(check_retraction(r) is None for r in rets):
         raise ValueError("bundle may only carry valid statements")
     pk = pubkey_from_seed(seed_hex)
     sig = ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex)).sign(
-        bundle_message(pk, seq, issued_at, expires_at, rots, revs)).hex()
-    return {"scheme": BUNDLE_SCHEME, "signer": pk, "seq": seq, "issued_at": issued_at, "expires_at": expires_at,
-            "rotations": rots, "revocations": revs, "sig": sig}
+        bundle_message(pk, seq, issued_at, expires_at, rots, revs, rets)).hex()
+    out = {"scheme": BUNDLE_SCHEME, "signer": pk, "seq": seq, "issued_at": issued_at, "expires_at": expires_at,
+           "rotations": rots, "revocations": revs, "sig": sig}
+    if rets: out["retractions"] = rets
+    return out
 
 def check_bundle(bundle, trusted_pubkeys, now=None, min_seq=None, equivocations=None):
     """Verify a pov-r/trust-bundle/1 against pinned root keys. The signer must be a key reachable from the pins via
     the bundle's own rotations, valid at issued_at, and not revoked (compromised at all, or retired at/before
     issued_at). now: reject if expired or issued in the future; min_seq: last seq this verifier accepted (rollback
     -> reject; equal seq is a re-fetch and OK). equivocations: pov-r/equivocation/1 proofs; a bundle whose signer is
-    proven to have equivocated is rejected (its snapshots can no longer be trusted to be the one global view). Returns {ok, reason, seq, signer, rotations, revocations}; never raises."""
+    proven to have equivocated is rejected (its snapshots can no longer be trusted to be the one global view). Returns {ok, reason, seq, signer, rotations, revocations, retractions}; never raises.
+    Carried retractions are only signature-checked here; who may retract which card is still decided by
+    check_card_retracted against the pins."""
     try:
         if not isinstance(bundle, dict) or bundle.get("scheme") != BUNDLE_SCHEME: return {"ok": False, "reason": "not a trust bundle"}
         pk, seq, ia, ea, sig = (bundle.get(k) for k in ("signer", "seq", "issued_at", "expires_at", "sig"))
-        rots, revs = bundle.get("rotations"), bundle.get("revocations")
+        rots, revs, rets = bundle.get("rotations"), bundle.get("revocations"), bundle.get("retractions", [])
         if not _hexn(pk, 64) or not _hexn(sig, 128) or not _int(seq) or not _num(ia) or not _num(ea) or ea <= ia:
             return {"ok": False, "reason": "bad bundle fields"}
-        if not isinstance(rots, list) or not isinstance(revs, list) or len(rots) + len(revs) > MAX_BUNDLE_STATEMENTS:
+        if not isinstance(rots, list) or not isinstance(revs, list) or not isinstance(rets, list) \
+                or len(rots) + len(revs) + len(rets) > MAX_BUNDLE_STATEMENTS:
             return {"ok": False, "reason": "bad bundle statements"}
         ed, _ = _ed()
         if ed is None: return {"ok": False, "reason": "ed25519 unavailable"}
-        try: ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(sig), bundle_message(pk, seq, ia, ea, rots, revs))
+        try: ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(sig), bundle_message(pk, seq, ia, ea, rots, revs, rets))
         except Exception: return {"ok": False, "reason": "bad signature"}
         win = resolve_trust(trusted_pubkeys, rots, revs)
         if not win: return {"ok": False, "reason": "no valid trusted pubkey"}
@@ -269,7 +280,8 @@ def check_bundle(bundle, trusted_pubkeys, now=None, min_seq=None, equivocations=
                 ev = check_equivocation(e, trusted_pubkeys)
                 if ev.get("ok") and ev.get("signer") == pk: return {"ok": False, "reason": "bundle signer equivocated", "signer": pk}
         return {"ok": True, "reason": None, "seq": seq, "signer": pk,
-                "rotations": [r for r in rots if check_rotation(r)], "revocations": [r for r in revs if check_revocation(r)]}
+                "rotations": [r for r in rots if check_rotation(r)], "revocations": [r for r in revs if check_revocation(r)],
+                "retractions": [r for r in rets if check_retraction(r)]}
     except Exception as e:
         return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
 
@@ -292,8 +304,8 @@ def check_equivocation(proof, trusted_pubkeys):
         ra, rb = check_bundle(a, trusted_pubkeys), check_bundle(b, trusted_pubkeys)
         if not ra.get("ok") or not rb.get("ok"): return {"ok": False, "reason": "bundle invalid: " + str(ra.get("reason") or rb.get("reason"))}
         if ra["signer"] != rb["signer"]: return {"ok": False, "reason": "different signers"}
-        ma = bundle_message(a["signer"], a["seq"], a["issued_at"], a["expires_at"], a["rotations"], a["revocations"])
-        mb = bundle_message(b["signer"], b["seq"], b["issued_at"], b["expires_at"], b["rotations"], b["revocations"])
+        ma = bundle_message(a["signer"], a["seq"], a["issued_at"], a["expires_at"], a["rotations"], a["revocations"], a.get("retractions"))
+        mb = bundle_message(b["signer"], b["seq"], b["issued_at"], b["expires_at"], b["rotations"], b["revocations"], b.get("retractions"))
         base = {"signer": ra["signer"]}
         if a["seq"] == b["seq"]:
             if ma == mb: return {"ok": False, "reason": "same bundle (re-fetch)", **base, "seq": a["seq"]}

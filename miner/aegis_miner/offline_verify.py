@@ -102,7 +102,7 @@ def main(argv=None):
     p.add_argument("--pubkey", action="append", help="trusted coordinator card key (hex, GET /v1/card-key); repeatable; card must be signed by one")
     p.add_argument("--revocation", action="append", help="self-signed key revocation JSON (pov-r/key-revoke/1); repeatable")
     p.add_argument("--rotation", action="append", help="dual-signed key rotation JSON (pov-r/key-rotate/1); repeatable, followed from --pubkey")
-    p.add_argument("--bundle", help="signed trust bundle JSON (pov-r/trust-bundle/1); its rotations/revocations are used, needs --pubkey")
+    p.add_argument("--bundle", help="signed trust bundle JSON (pov-r/trust-bundle/1); its rotations/revocations/retractions are used, needs --pubkey")
     p.add_argument("--equivocation", action="append", help="equivocation proof JSON (pov-r/equivocation/1); repeatable; a proven-equivocating bundle signer is rejected")
     p.add_argument("--retraction", action="append", help="signed card retraction JSON (pov-r/card-retract/1); repeatable; needs --pubkey")
     p.add_argument("--now", type=float, help="unix time for bundle expiry check")
@@ -124,7 +124,7 @@ def main(argv=None):
         b = ca.check_bundle(bundle, a.pubkey, a.now, a.min_seq, eqs)
         if not b["ok"]:
             print(json.dumps({"ok": False, "trusted": False, "reason": f"trust bundle: {b['reason']}"})); return 1
-        rots, revs = rots + b["rotations"], revs + b["revocations"]
+        rots, revs, rets = rots + b["rotations"], revs + b["revocations"], rets + b["retractions"]
     if rets and not a.pubkey:
         print(json.dumps({"ok": False, "trusted": False, "reason": "--retraction needs --pubkey"})); return 1
     r = verify_offline(obj, card, a.root, a.leaf_count, a.pubkey, revs, rots, rets)
