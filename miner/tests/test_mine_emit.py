@@ -5,8 +5,8 @@ G = 1_700_000_000
 E = m.EMISSION_ERA_SECONDS
 
 def test_alloc():
-    assert m.preview_allocations()["mine"] == 850_000_000
-    assert m.TEAM_ALLOC == 100_000_000 and m.ECO_ALLOC == 50_000_000
+    assert m.preview_allocations()["mine"] == 8_500_000_000
+    assert m.TEAM_ALLOC == 1_000_000_000 and m.ECO_ALLOC == 500_000_000
     assert m.MINE_ALLOC + m.TEAM_ALLOC + m.ECO_ALLOC == m.MAX_SUPPLY
 
 def test_era():
@@ -39,3 +39,9 @@ def test_reward():
 def test_fail_closed(args):
     with pytest.raises(ValueError):
         m.reward_for_work(*args, now=G, genesis=G)
+
+def test_10b_fits_u64_and_no_month_dump():
+    assert m.MAX_SUPPLY == 10_000_000_000
+    assert m.MAX_SUPPLY * m.BASE < 2**64
+    month = 30 * 24 * 3600
+    assert m.emitted_until(G + month, G) < m.MINE_ALLOC_BASE * 3 // 100  # <3% in first month

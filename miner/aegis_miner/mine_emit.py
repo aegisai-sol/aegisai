@@ -1,24 +1,24 @@
-"""pov-r/mine-emit/1 — AGIS emission schedule (off-chain preview library).
+"""pov-r/mine-emit/2 — AGIS emission schedule (off-chain preview library).
 
-Plain rules: max 1,000,000,000 AGIS. 85% is created only by mining, 10% team
+Plain rules: max 10,000,000,000 AGIS. 85% is created only by mining, 10% team
 (slow vest), 5% ecosystem/pool. Mining reward halves every ~2 years (era).
 
 Formula (Bitcoin-style geometric): amounts are integer *base units*
-(9 decimals, like SPL tokens). Era 0 emits ~half the mining pool:
+(9 decimals; 10B*1e9 = 1e19 < u64 max 1.8e19, fits SPL). Era 0 emits ~half the mining pool:
     rate0 = (MINE_ALLOC_BASE // 2) // EMISSION_ERA_SECONDS
     emission_per_second(era) = rate0 >> era
 Sum over all eras < 2*rate0*ERA <= MINE_ALLOC_BASE, so the cap can never be
 exceeded. Integer math only; no floats, no RPC, no keys.
 """
-SCHEME_ID = "pov-r/mine-emit/1"
+SCHEME_ID = "pov-r/mine-emit/2"
 DECIMALS = 9
 BASE = 10 ** DECIMALS
-MAX_SUPPLY = 1_000_000_000
+MAX_SUPPLY = 10_000_000_000
 MINE_BPS, TEAM_BPS, ECO_BPS = 8500, 1000, 500
 assert MINE_BPS + TEAM_BPS + ECO_BPS == 10000
-TEAM_ALLOC = MAX_SUPPLY * TEAM_BPS // 10000  # 100_000_000
-ECO_ALLOC = MAX_SUPPLY * ECO_BPS // 10000    # 50_000_000
-MINE_ALLOC = MAX_SUPPLY - TEAM_ALLOC - ECO_ALLOC  # 850_000_000
+TEAM_ALLOC = MAX_SUPPLY * TEAM_BPS // 10000  # 1_000_000_000
+ECO_ALLOC = MAX_SUPPLY * ECO_BPS // 10000    # 500_000_000
+MINE_ALLOC = MAX_SUPPLY - TEAM_ALLOC - ECO_ALLOC  # 8_500_000_000
 MINE_ALLOC_BASE = MINE_ALLOC * BASE
 EMISSION_ERA_SECONDS = 2 * 365 * 24 * 3600  # ~2 years
 RATE0 = (MINE_ALLOC_BASE // 2) // EMISSION_ERA_SECONDS

@@ -1,0 +1,60 @@
+import pytest
+from aegis_miner import mine_claim as mc, mine_emit as me
+
+G = 1_700_000_000
+W = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
+W2 = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R"
+
+def C(**k):
+    c = dict(wallet=W, device_id="d1", start=G, online_seconds=60, power_score=1, verified_tasks=1); c.update(k); return c
+
+def L():
+    l = mc.ClaimLedger(G); l.bind(W, "d1"); return l
+
+def test_claim_pays_wallet():
+    l = L(); r = l.claim(C(), now=G + 600)
+    assert r["agis_base"] > 0 and l.balances[W] == r["agis_base"]
+
+def test_more_power_and_time_more_reward():
+    assert mc.work_units(4, 60, 1) == 2 * mc.work_units(1, 60, 1)
+    assert mc.work_units(1, 120, 1) == 2 * mc.work_units(1, 60, 1)
+    assert mc.work_units(100, 60, 1) == 10 * mc.work_units(1, 60, 1)
+
+def test_wallet_required():
+    l = mc.ClaimLedger(G)
+    for bad in ("", "0OIl" * 10, None):
+        with pytest.raises(ValueError): l.bind(bad, "d1")
+    with pytest.raises(ValueError): l.claim(C(), now=G + 600)
+
+@pytest.mark.parametrize("kw", [dict(verified_tasks=0), dict(power_score=0), dict(power_score=101),
+    dict(online_seconds=0), dict(online_seconds=3601), dict(start=G - 1), dict(start=G + 10_000), dict(power_score=1.5)])
+def test_fail_closed(kw):
+    l = L()
+    with pytest.raises(ValueError): l.claim(C(**kw), now=G + 600)
+    assert l.total == 0
+
+def test_replay_blocked():
+    l = L(); l.claim(C(), now=G + 600)
+    with pytest.raises(ValueError): l.claim(C(), now=G + 600)
+    l.claim(C(start=G + 60), now=G + 600)
+
+def test_device_cap_and_steal():
+    l = mc.ClaimLedger(G)
+    for i in range(mc.MAX_DEVICES_PER_WALLET): l.bind(W, f"d{i}")
+    with pytest.raises(ValueError): l.bind(W, "extra")
+    with pytest.raises(ValueError): l.bind(W2, "d0")
+
+def test_halving_applies():
+    l = L(); E = me.EMISSION_ERA_SECONDS
+    a = l.claim(C(), now=G + 600)["agis_base"]
+    b = l.claim(C(start=G + E), now=G + E + 600)["agis_base"]
+    assert b == a // 2 or abs(b * 2 - a) <= 60
+
+def test_ed25519_optional():
+    ed = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ed25519")
+    from cryptography.hazmat.primitives import serialization as s
+    k = ed.Ed25519PrivateKey.generate()
+    pub = k.public_key().public_bytes(s.Encoding.Raw, s.PublicFormat.Raw)
+    l = mc.ClaimLedger(G); l.bind(W, "d1", pub)
+    with pytest.raises(ValueError): l.claim(C(), now=G + 600, signature=b"x" * 64)
+    assert l.claim(C(), now=G + 600, signature=k.sign(mc.claim_message(C())))["agis_base"] > 0
