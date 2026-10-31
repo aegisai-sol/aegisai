@@ -45,3 +45,14 @@ def consensus(url, claim_text, nodes, quorum=2):
            "per_node": [{k: r.get(k) for k in ("node", "vote", "source_hash", "error")} for r in results]}
     rec["receipt_digest"] = hashlib.sha256(json.dumps({k: rec[k] for k in ("url", "claim", "status", "consensus_hash", "consensus_vote")}, sort_keys=True).encode()).hexdigest()
     return rec
+
+
+def canonical_json(x) -> str:
+    """Sorted keys, compact separators; mirrors site/js/receipt-demo.js canonicalJson."""
+    import json as _j
+    return _j.dumps(x, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def receipt_digest(body) -> str:
+    import hashlib as _h
+    return "sha256:" + _h.sha256(canonical_json(body).encode()).hexdigest()
