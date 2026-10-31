@@ -303,3 +303,74 @@ def check_equivocation(proof, trusted_pubkeys):
         return {"ok": False, "reason": "consistent history", **base}
     except Exception as e:
         return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
+
+RETRACT_SCHEME = "pov-r/card-retract/1"
+RETRACT_REASONS = ("source_withdrawn", "error", "superseded")
+
+def retract_message(signer, receipt_id, digest, reason, retracted_at, superseded_by):
+    core = {"signer": signer, "receipt_id": receipt_id, "digest": digest, "reason": reason,
+            "retracted_at": retracted_at, "superseded_by": superseded_by}
+    return RETRACT_SCHEME.encode() + b"\n" + _canon(core).encode()
+
+def make_retraction(seed_hex, card, reason, retracted_at, superseded_by=None):
+    """Signed retraction of ONE issued proof card (e.g. a cited source was later withdrawn, or the verdict was wrong).
+    Cards are offline artifacts that live forever in screenshots and PDFs; without retraction a correct-at-issue but
+    later-invalidated card keeps vouching. Bound to the card's receipt_id AND digest, so it can't be replayed against
+    another card. 'superseded' must name the replacement receipt_id. Raises ValueError."""
+    ed, _ = _ed()
+    if ed is None: raise ValueError("ed25519 unavailable (install cryptography)")
+    if not _hexn(seed_hex, 64): raise ValueError("bad seed")
+    if not isinstance(card, dict): raise ValueError("card must be an object")
+    rid, dg = card.get("receipt_id"), card.get("digest")
+    if not isinstance(rid, str) or not rid or not isinstance(dg, str) or not dg: raise ValueError("card needs receipt_id and digest")
+    if reason not in RETRACT_REASONS: raise ValueError("reason must be source_withdrawn|error|superseded")
+    if not _num(retracted_at): raise ValueError("bad retracted_at")
+    if reason == "superseded":
+        if not isinstance(superseded_by, str) or not superseded_by or superseded_by == rid: raise ValueError("superseded needs a different superseded_by receipt_id")
+    elif superseded_by is not None: raise ValueError("superseded_by only allowed with reason superseded")
+    pk = pubkey_from_seed(seed_hex)
+    sig = ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex)).sign(
+        retract_message(pk, rid, dg, reason, retracted_at, superseded_by)).hex()
+    return {"scheme": RETRACT_SCHEME, "signer": pk, "receipt_id": rid, "digest": dg, "reason": reason,
+            "retracted_at": retracted_at, "superseded_by": superseded_by, "sig": sig}
+
+def check_retraction(ret):
+    """Return (signer, receipt_id, digest, reason, retracted_at, superseded_by) for a well-signed retraction, else None.
+    Signature only; who may retract is decided by check_card_retracted. Never raises."""
+    try:
+        if not isinstance(ret, dict) or ret.get("scheme") != RETRACT_SCHEME: return None
+        f = tuple(ret.get(k) for k in ("signer", "receipt_id", "digest", "reason", "retracted_at", "superseded_by"))
+        pk, rid, dg, reason, at, sb = f
+        if not _hexn(pk, 64) or not _hexn(ret.get("sig"), 128) or reason not in RETRACT_REASONS or not _num(at): return None
+        if not isinstance(rid, str) or not rid or not isinstance(dg, str) or not dg: return None
+        if reason == "superseded":
+            if not isinstance(sb, str) or not sb or sb == rid: return None
+        elif sb is not None: return None
+        ed, _ = _ed()
+        if ed is None: return None
+        ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(ret["sig"]), retract_message(*f))
+        return f
+    except Exception:
+        return None
+
+def check_card_retracted(card, retractions, trusted_pubkeys, rotations=None, revocations=None):
+    """Is this card retracted by an authorised key? Authorised = reachable from the pins (same trust graph as
+    verify_card_chain, so a successor key can retract its predecessor's cards) and not revoked as 'compromised'.
+    A retraction only ever REMOVES trust, so a retired/rotated-out key may still retract (fail-safe), but strangers,
+    forgers, compromised keys and retractions for a different receipt_id/digest are ignored (no third-party DoS).
+    Earliest valid retraction wins deterministically. Returns {retracted, reason, retracted_at, superseded_by, signer};
+    never raises (malformed input -> retracted False)."""
+    try:
+        if not isinstance(card, dict) or not retractions: return {"retracted": False}
+        win = resolve_trust(trusted_pubkeys, rotations, revocations)
+        bad = {c[0] for c in (check_revocation(r) for r in revocations or []) if c and c[1] == "compromised"}
+        best = None
+        for r in list(retractions)[:MAX_BUNDLE_STATEMENTS]:
+            c = check_retraction(r)
+            if c is None or c[0] not in win or c[0] in bad: continue
+            if c[1] != card.get("receipt_id") or c[2] != card.get("digest"): continue
+            if best is None or (c[4], c[3], c[0]) < (best[4], best[3], best[0]): best = c
+        if best is None: return {"retracted": False}
+        return {"retracted": True, "reason": best[3], "retracted_at": best[4], "superseded_by": best[5], "signer": best[0]}
+    except Exception:
+        return {"retracted": False}

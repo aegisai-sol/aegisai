@@ -39,7 +39,7 @@ def _card_pins(card):
         return None, None, None, "proof card self-audit not intact"
     return root, n, rid, None
 
-def verify_offline(obj, card=None, root=None, leaf_count=None, pubkeys=None, revocations=None, rotations=None):
+def verify_offline(obj, card=None, root=None, leaf_count=None, pubkeys=None, revocations=None, rotations=None, retractions=None):
     """Verify any disclosure kind against trusted pins (card and/or explicit root/leaf_count).
     pubkeys: trusted coordinator card keys (hex). When given, the card MUST carry a valid Ed25519 attestation
     from one of them (pov-r/card-attest/1), so a forged card cannot vouch for a forged disclosure.
@@ -53,6 +53,12 @@ def verify_offline(obj, card=None, root=None, leaf_count=None, pubkeys=None, rev
             sv = ca.verify_card_chain(card, pubkeys, rotations, revocations)
             if not sv["ok"]: return {"ok": False, "trusted": False, "kind": kind, "reason": f"card attestation: {sv['reason']}", "card_signed": False}
             signer = sv["signer"]
+            if retractions:
+                rt = ca.check_card_retracted(card, retractions, pubkeys, rotations, revocations)
+                if rt.get("retracted"):
+                    return {"ok": False, "trusted": False, "kind": kind, "card_signed": True, "signer": signer, "retracted": True,
+                            "reason": f"proof card retracted ({rt['reason']})", "retracted_at": rt["retracted_at"],
+                            "superseded_by": rt["superseded_by"], "retracted_by": rt["signer"]}
         croot, cn, crid, err = _card_pins(card)
         if err: return {"ok": False, "trusted": False, "kind": kind, "reason": err}
         for a, b, what in ((root, croot, "root"), (leaf_count, cn, "leaf_count")):
@@ -98,6 +104,7 @@ def main(argv=None):
     p.add_argument("--rotation", action="append", help="dual-signed key rotation JSON (pov-r/key-rotate/1); repeatable, followed from --pubkey")
     p.add_argument("--bundle", help="signed trust bundle JSON (pov-r/trust-bundle/1); its rotations/revocations are used, needs --pubkey")
     p.add_argument("--equivocation", action="append", help="equivocation proof JSON (pov-r/equivocation/1); repeatable; a proven-equivocating bundle signer is rejected")
+    p.add_argument("--retraction", action="append", help="signed card retraction JSON (pov-r/card-retract/1); repeatable; needs --pubkey")
     p.add_argument("--now", type=float, help="unix time for bundle expiry check")
     p.add_argument("--min-seq", type=int, help="last accepted bundle seq (rollback protection)")
     p.add_argument("--allow-untrusted", action="store_true", help="exit 0 on ok even without pinned root/leaf_count")
@@ -108,6 +115,7 @@ def main(argv=None):
         rots = [_load(x) for x in a.rotation or []]
         bundle = _load(a.bundle) if a.bundle else None
         eqs = [_load(x) for x in a.equivocation or []]
+        rets = [_load(x) for x in a.retraction or []]
     except (OSError, ValueError) as e:
         print(json.dumps({"ok": False, "trusted": False, "reason": f"cannot read input: {e}"})); return 2
     if bundle is not None:
@@ -117,7 +125,9 @@ def main(argv=None):
         if not b["ok"]:
             print(json.dumps({"ok": False, "trusted": False, "reason": f"trust bundle: {b['reason']}"})); return 1
         rots, revs = rots + b["rotations"], revs + b["revocations"]
-    r = verify_offline(obj, card, a.root, a.leaf_count, a.pubkey, revs, rots)
+    if rets and not a.pubkey:
+        print(json.dumps({"ok": False, "trusted": False, "reason": "--retraction needs --pubkey"})); return 1
+    r = verify_offline(obj, card, a.root, a.leaf_count, a.pubkey, revs, rots, rets)
     if bundle is not None: r["bundle_seq"] = b["seq"]
     print(json.dumps(r, indent=2, sort_keys=True))
     return 0 if r["ok"] and (r["trusted"] or a.allow_untrusted) else 1
