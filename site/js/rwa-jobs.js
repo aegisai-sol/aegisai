@@ -56,3 +56,24 @@ export async function unwrapKey(job) {
   const raw = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: blob.slice(0, 12) }, W, blob.slice(12)));
   return 'agis1:' + [...raw].map(x => x.toString(16).padStart(2, '0')).join('');
 }
+
+// Anchor on Solana — SEALER pays the tiny network fee from their own wallet. The firm never pays.
+export const RPC = 'https://solana-rpc.publicnode.com';
+export async function anchorJob(job) {
+  const p = window.phantom?.solana || window.solana || window.backpack?.solana;
+  if (!p) throw new Error('Connect a Solana wallet (Phantom) with a little SOL to anchor.');
+  if (!p.publicKey) await p.connect();
+  const W = await import('https://esm.sh/@solana/web3.js@1.95.3');
+  const memo = job.anchorMemo || `AEGIS/rwa/v1|${job.id}|${job.fingerprint}|${job.status}|${job.created}|${job.validUntil || 'forever'}`;
+  const conn = new W.Connection(RPC, 'confirmed');
+  const payer = new W.PublicKey(p.publicKey.toString());
+  const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed');
+  const tx = new W.Transaction({ feePayer: payer, blockhash, lastValidBlockHeight });
+  tx.add(new W.TransactionInstruction({ programId: new W.PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'), keys: [{ pubkey: payer, isSigner: true, isWritable: false }], data: new TextEncoder().encode(memo) }));
+  const { signature } = await p.signAndSendTransaction(tx);
+  await conn.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed').catch(() => {});
+  for (let i = 0; i < 6; i++) {
+    try { return await j(RWA_API + '/jobs/' + job.id + '/receipt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ receiptTx: signature }) }); }
+    catch (e) { if (i === 5) throw e; await new Promise(r => setTimeout(r, 3000)); }
+  }
+}
