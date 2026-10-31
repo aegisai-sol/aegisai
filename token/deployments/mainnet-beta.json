@@ -1,0 +1,20 @@
+{
+  "cluster": "mainnet-beta",
+  "mint": "GhSiU95vtKwn7FBAW1u5krxYP2PnpFPotb1LJFZkbzhW",
+  "decimals": 9,
+  "maxSupply": "10000000000",
+  "circulatingSupply": "1500000000000000000",
+  "mintedAtLaunch": "1500000000",
+  "mineReserved": "8500000000",
+  "mintAuthority": "D96QgCXx93AMfKVLikbD8xbxQ6iB1bgrj9PWSiCVNgEg",
+  "freezeAuthority": null,
+  "payer": "D96QgCXx93AMfKVLikbD8xbxQ6iB1bgrj9PWSiCVNgEg",
+  "teamWallet": "2MzLPXNvkU2VsezPFgdM6SGFHzddGURMguAFAFwKkoXM",
+  "teamAta": "GYiwsyME7ZRn9kQRBaxABA6aZy86F6r5qEatkYbr4Lx2",
+  "teamAlloc": "1000000000",
+  "ecoWallet": "9DmwoF1qJ8fASDasjkE2jacrEAWuRwUnDWwJ41eQgKan",
+  "ecoAta": "C7QUgxf9BXLCho8Cod7FUgLMa6GrroqgumaFrsUmtrNZ",
+  "ecoAlloc": "500000000",
+  "explorer": "https://explorer.solana.com/address/GhSiU95vtKwn7FBAW1u5krxYP2PnpFPotb1LJFZkbzhW",
+  "createdAt": "2026-10-31T10:56:55.359Z"
+}
