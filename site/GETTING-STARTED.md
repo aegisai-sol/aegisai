@@ -10,3 +10,8 @@
 6. **RWA** — upload documents on the [RWA page](https://aegisai-sol.github.io/aegisai/rwa.html) (encrypted, queued as verification jobs).
 
 **Status (honest):** token is real on mainnet; miner/PWA is live; on-chain payout on Claim is in beta (claim server not yet public — claims are recorded and paid out as the server goes live). **Audit: not yet — planned.** Not financial advice.
+
+## Claim → mint status (light & secure)
+- Mining is light: Web Worker, max **1 task/sec**, no GPU, UI pauses when tab is hidden. Phones OK; for always-on use the desktop miner.
+- **Claim mint is OFF** until the separate claim API is live. Claims are wallet-signed and saved locally; they will be paid once the API is set.
+- The mint key is **never** in the site or browser. See [CLAIM-ARCHITECTURE.md](CLAIM-ARCHITECTURE.md).
