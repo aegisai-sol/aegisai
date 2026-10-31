@@ -1,6 +1,6 @@
 import {rpc,RPCS,CLAIM_API,MINT,fmt,spark} from './live.js';
 const MAX=1e10,PREMINT=1.5e9,MINT_AUTH='D96QgCXx93AMfKVLikbD8xbxQ6iB1bgrj9PWSiCVNgEg';
-export const WALLETS=[{id:'team',name:'Team 10%',addr:'2MzLPXNvkU2VsezPFgdM6SGFHzddGURMguAFAFwKkoXM',expect:1e9,col:'#f5c451'},{id:'eco',name:'Eco / pool 5%',addr:'9DmwoF1qJ8fASDasjkE2jacrEAWuRwUnDWwJ41eQgKan',expect:5e8,col:'#22d3ee'}];
+export const WALLETS=[{id:'team',name:'Team 10%',addr:'2MzLPXNvkU2VsezPFgdM6SGFHzddGURMguAFAFwKkoXM',ata:'GYiwsyME7ZRn9kQRBaxABA6aZy86F6r5qEatkYbr4Lx2',expect:1e9,col:'#f5c451'},{id:'eco',name:'Eco / pool 5%',addr:'9DmwoF1qJ8fASDasjkE2jacrEAWuRwUnDWwJ41eQgKan',ata:'C7QUgxf9BXLCho8Cod7FUgLMa6GrroqgumaFrsUmtrNZ',expect:5e8,col:'#22d3ee'}];
 const $=i=>document.getElementById(i);
 const ss=a=>`<a class="text-cyan underline" target="_blank" rel="noopener" href="https://solscan.io/account/${a}">${a.slice(0,6)}…${a.slice(-6)}</a>`;
 async function ping(u,o={}){const t=performance.now();try{const r=await fetch(u,{signal:AbortSignal.timeout(15000),...o});return{ok:r.ok,ms:Math.round(performance.now()-t),r}}catch(e){return{ok:false,ms:Math.round(performance.now()-t)}}}
@@ -21,8 +21,8 @@ async function token(){
  <div><div class="k">Mint authority</div><div class="font-mono text-xs">${ss(info.mintAuthority||MINT_AUTH)} ${info.mintAuthority&&info.mintAuthority!==MINT_AUTH?'<b class="text-rose-400">CHANGED!</b>':''}</div></div>
  <div><div class="k">Freeze authority</div><div class="font-mono text-xs">${info.freezeAuthority===null?'✅ revoked':info.freezeAuthority?'⚠️ '+info.freezeAuthority:'revoked (expected)'}</div></div>`;return sup}
 async function wallet(w){
- const [t,b]=await Promise.all([rpc('getTokenAccountsByOwner',[w.addr,{mint:MINT},{encoding:'jsonParsed'}]),rpc('getBalance',[w.addr]).catch(()=>({res:{value:0}}))]);
- const bal=t.res.value.reduce((a,x)=>a+(+x.account.data.parsed.info.tokenAmount.uiAmountString),0),sol=b.res.value/1e9;
+ const tok=async()=>{try{return +(await rpc('getTokenAccountBalance',[w.ata])).res.value.uiAmountString}catch(e){const t=await rpc('getTokenAccountsByOwner',[w.addr,{mint:MINT},{encoding:'jsonParsed'}]);return t.res.value.reduce((a,x)=>a+(+x.account.data.parsed.info.tokenAmount.uiAmountString),0)}};
+ const [bal,b]=await Promise.all([tok(),rpc('getBalance',[w.addr]).catch(()=>({res:{value:0}}))]);const sol=b.res.value/1e9;
  const H=JSON.parse(localStorage['teamHist_'+w.id]||'[]');H.push({t:Date.now(),bal});localStorage['teamHist_'+w.id]=JSON.stringify(H.slice(-300));
  const drop=bal<w.expect*0.999;
  $(w.id).innerHTML=`<div class="flex items-center justify-between"><h2 class="font-bold text-lg">${w.name}</h2>${drop?'<span class="px-2 py-1 rounded bg-rose-500/20 text-rose-300 text-xs font-bold">⚠ BELOW EXPECTED</span>':'<span class="px-2 py-1 rounded bg-emerald-500/15 text-emerald-300 text-xs">intact</span>'}</div>
