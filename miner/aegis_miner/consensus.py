@@ -24,7 +24,10 @@ def http_node(node_id, endpoint, timeout=15):
     run.node_id = node_id
     return run
 
-def consensus(url, claim_text, nodes, quorum=2):
+def consensus(url, claim_text, nodes, quorum=2, weights=None):
+    """weights: optional {node_id: float>0}. When given, the verdict is picked by WEIGHTED tally
+    (sum of voter weights) instead of raw count; quorum still requires >= quorum distinct agreeing nodes.
+    Missing node ids default to weight 1.0. Hash agreement stays count-based (bytes are bytes)."""
     if len(nodes) < quorum: raise ValueError(f"need >= {quorum} nodes")
     def safe(n):
         try: return n(url, claim_text)
@@ -34,6 +37,19 @@ def consensus(url, claim_text, nodes, quorum=2):
     votes = Counter(r.get("vote") for r in results if r.get("vote") and not r.get("error"))
     top_hash, hash_n = hashes.most_common(1)[0] if hashes else (None, 0)
     top_vote, vote_n = votes.most_common(1)[0] if votes else (None, 0)
+    vote_weight = total_weight = None
+    if weights is not None:
+        import math
+        for k, v in weights.items():  # reject poisoned weights (negative/NaN/inf/bool) before tallying
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
+                raise ValueError(f"invalid weight for {k!r}")
+        wt = Counter()
+        for r in results:
+            if r.get("vote") and not r.get("error"): wt[r["vote"]] += float(weights.get(r.get("node"), 1.0))
+        total_weight = round(sum(wt.values()), 6)
+        if wt:  # deterministic tie-break: higher weight, then higher count, then vote name
+            top_vote = max(wt, key=lambda v: (wt[v], votes[v], str(v))); vote_n = votes[top_vote]
+            vote_weight = round(wt[top_vote], 6)
     hash_ok, vote_ok = hash_n >= quorum, vote_n >= quorum and top_vote != "UNSURE"
     if hash_ok and vote_ok: status = "VALID"            # same bytes, same verdict
     elif vote_ok: status = "VALID_VERDICT"              # dynamic page (ads/timestamps) but verdicts agree
@@ -43,6 +59,7 @@ def consensus(url, claim_text, nodes, quorum=2):
            "valid": status in ("VALID", "VALID_VERDICT"), "consensus_hash": top_hash if hash_ok else None,
            "hash_agree": hash_n, "consensus_vote": top_vote if vote_ok else None, "vote_agree": vote_n,
            "per_node": [{k: r.get(k) for k in ("node", "vote", "source_hash", "error")} for r in results]}
+    if weights is not None: rec.update(weighted=True, vote_weight=vote_weight, total_weight=total_weight)
     rec["receipt_digest"] = hashlib.sha256(json.dumps({k: rec[k] for k in ("url", "claim", "status", "consensus_hash", "consensus_vote")}, sort_keys=True).encode()).hexdigest()
     return rec
 
@@ -116,6 +133,25 @@ class PeerHealth:
             if s["alive"] and s["fails"] >= self.n: s["alive"] = False
         return s["alive"]
 
+    # Uptime weight formula (documented contract):
+    #   weight(peer) = 0                                  if peer is dead
+    #   weight(peer) = 1 + min(oks, cap) / cap            if alive   -> range [1.0, 2.0]
+    # where oks = consecutive successful observations (ping or vote) and cap = weight_cap (default 10).
+    # A fresh/unknown peer has weight 1.0; a peer with a >= cap success streak counts double.
+    # Bounded so one long-lived peer can never outvote two fresh honest peers (2.0 == 1.0 + 1.0, ties
+    # break on raw count). Any failure resets oks -> weight drops back to 1.0 immediately.
+    weight_cap = 10
+
+    def weight(self, endpoint):
+        s = self._s.get(endpoint)
+        if s is None: return 1.0
+        if not s["alive"]: return 0.0
+        return 1.0 + min(s["oks"], self.weight_cap) / self.weight_cap
+
+    def weights(self, endpoints):
+        """{peerN: weight} keyed by ids only (URLs never exposed)."""
+        return {f"peer{i}": self.weight(e) for i, e in enumerate(endpoints)}
+
     def is_alive(self, endpoint): return self._s.get(endpoint, {"alive": True})["alive"]
 
     def observe_pings(self, endpoints, results):
@@ -125,7 +161,8 @@ class PeerHealth:
     def summary(self, endpoints):
         alive = [e for e in endpoints if self.is_alive(e)]
         return {"alive": len(alive), "dead": len(endpoints) - len(alive), "known": len(endpoints),
-                "fail_threshold": self.n, "recover_threshold": self.m}
+                "fail_threshold": self.n, "recover_threshold": self.m,
+                "weights": self.weights(endpoints), "weight_cap": self.weight_cap}
 
     def alive_endpoints(self, endpoints): return [e for e in endpoints if self.is_alive(e)]
 
@@ -150,7 +187,7 @@ def build_nodes(peer_endpoints, health=None, quorum=2, node_factory=None):
     skipped = [f"peer{i}" for i, e in enumerate(peers) if e not in alive]
     return nodes, {"mode": "peers", "known": len(peers), "alive": len(alive), "skipped": skipped}
 
-def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node_factory=None):
+def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node_factory=None, weighted=False):
     """Consensus over alive peers; too few alive -> NO_CONSENSUS with reason (no exception).
     Passive health: a peer that errors during collection counts as a failed observation."""
     health = health or PEER_HEALTH
@@ -159,7 +196,11 @@ def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node
         return {"url": url, "claim": claim_text, "quorum": quorum, "nodes": len(nodes), "status": "NO_CONSENSUS",
                 "valid": False, "reason": "insufficient_alive_peers", "consensus_hash": None, "consensus_vote": None,
                 "per_node": [], "peer_selection": info}
-    rec = consensus(url, claim_text, nodes, quorum=quorum)
+    _p = [p.strip() for p in peer_endpoints if p and p.strip()]
+    w = None
+    if weighted and _p:  # local self node = 1.0; peers by uptime streak (see PeerHealth.weight)
+        w = dict(health.weights(_p)); w.setdefault("self", 1.0)
+    rec = consensus(url, claim_text, nodes, quorum=quorum, weights=w)
     peers = [p.strip() for p in peer_endpoints if p and p.strip()]
     for r in rec["per_node"]:
         nid = r.get("node") or ""
