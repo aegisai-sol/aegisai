@@ -83,7 +83,8 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
                                      ("/v1/receipts/{id}", "get", "Single receipt"),
                                      ("/v1/receipts/{id}/proof", "get", "Shareable proof card: digest, nonce, vote tally, self-audit; no claim texts/client_id/MAC"),
                                      ("/v1/receipts/{id}/claims/{index}", "get", "Selective disclosure: one claim + salt + Merkle path to claims_root (others stay hidden)"),
-                                     ("/v1/claims/verify-disclosure", "post", "Check a claim disclosure (or {disclosures:[...]} set from one receipt, max 32, distinct indices) against claims_root (expected_root from proof card)"),
+                                     ("/v1/receipts/{id}/claims", "get", "Compact multiproof: ?indices=0,3,5 -> k claims + salts + shared sibling hashes (scheme pov-r/claim-multiproof/1)"),
+                                     ("/v1/claims/verify-disclosure", "post", "Check a claim disclosure, {disclosures:[...]} set (max 32), or {multiproof} (stored root + leaf_count bind k-of-N) against claims_root"),
                                      ("/v1/receipts/verify", "post", "Audit a presented receipt: digest recompute, HMAC, matches stored copy"),
                                      ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
                                      ("/v1/metrics", "get", "Counters: verify_count, fee_preview_count, rate_limit_hits, body_rejected"),
@@ -143,6 +144,21 @@ class H(BaseHTTPRequestHandler):
                 if not since.isdigit(): return self._send(400, {"error": "since must be a non-negative integer (epoch seconds)"})
                 since = int(since)
             self._send(200, list_receipts(limit, offset, status, since))
+        elif self.path.startswith("/v1/receipts/") and "/claims?" in self.path:
+            from . import claim_merkle as _cm
+            from urllib.parse import parse_qs
+            rid, _, qs = self.path[len("/v1/receipts/"):].partition("/claims?"); f = os.path.join(RECEIPTS, rid + ".json")
+            if not (rid.isalnum() and os.path.exists(f)): return self._send(404, {"error": "receipt not found"})
+            raw = (parse_qs(qs, keep_blank_values=True).get("indices") or [""])[0]
+            parts = raw.split(",") if raw else []
+            if not parts or len(parts) > _cm.MAX_MULTI or not all(x.isdigit() and len(x) <= 6 for x in parts):
+                return self._send(400, {"error": f"indices must be 1..{_cm.MAX_MULTI} comma-separated non-negative integers"})
+            try: rec = json.load(open(f))
+            except Exception: return self._send(500, {"error": "stored receipt unreadable"})
+            if not isinstance(rec, dict): return self._send(500, {"error": "stored receipt unreadable"})
+            try: self._send(200, _cm.disclose_multi(rec, [int(x) for x in parts]))
+            except IndexError as e: self._send(404, {"error": str(e)})
+            except ValueError as e: self._send(400, {"error": str(e)})
         elif self.path.startswith("/v1/receipts/") and "/claims/" in self.path:
             from . import claim_merkle as _cm
             rid, _, idx = self.path[len("/v1/receipts/"):].partition("/claims/"); f = os.path.join(RECEIPTS, rid + ".json")
@@ -210,6 +226,23 @@ class H(BaseHTTPRequestHandler):
             try: b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             except Exception: return self._send(400, {"error": "bad json"})
             if not isinstance(b, dict): return self._send(400, {"error": "object required"})
+            if "multiproof" in b:  # compact k-of-N proof; stored root AND stored leaf_count bind it when the receipt is ours
+                m, exp, n_exp, src = b.get("multiproof"), b.get("expected_root"), b.get("expected_leaf_count"), None
+                rid = m.get("receipt_id") if isinstance(m, dict) else None
+                if n_exp is not None and (not isinstance(n_exp, int) or isinstance(n_exp, bool) or n_exp < 1):
+                    return self._send(400, {"error": "expected_leaf_count must be a positive integer"})
+                if isinstance(rid, str) and rid.isalnum() and os.path.exists(os.path.join(RECEIPTS, rid + ".json")):
+                    try:
+                        stored = json.load(open(os.path.join(RECEIPTS, rid + ".json")))
+                        if isinstance(stored, dict):
+                            sr, sn = _cm.claims_root(stored), len(_cm.real_claims(stored))
+                            if (exp is not None and exp != sr) or (n_exp is not None and n_exp != sn):
+                                return self._send(200, {"ok": False, "reason": "expected root/leaf_count disagree with stored receipt", "root_source": "stored"})
+                            exp, n_exp, src = sr, sn, "stored"
+                    except Exception: pass
+                r = _cm.verify_multi(m, exp, n_exp)
+                if src: r["root_source"] = src; r["leaf_count_source"] = src
+                return self._send(200, r)
             multi = "disclosures" in b
             d, exp, src = b.get("disclosures") if multi else b.get("disclosure", b), b.get("expected_root"), None
             first = d[0] if multi and isinstance(d, list) and d else d
