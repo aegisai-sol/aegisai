@@ -129,8 +129,17 @@ def peer_liveness(endpoints, now=_time.time, stale_s=300):
 # --- peer health hysteresis: dead after N consecutive fails, alive again after M consecutive oks ---
 class PeerHealth:
     """Flap-resistant peer state. Starts 'alive'. Ids only (peer0..N); URLs never exposed."""
-    def __init__(self, fail_threshold=3, recover_threshold=2, half_life=0.0, clock=None, disagree_cap=4, weight_floor=0.0):
+    def __init__(self, fail_threshold=3, recover_threshold=2, half_life=0.0, clock=None, disagree_cap=4, weight_floor=0.0,
+                 agreement_window=20, agreement_threshold=0.0, agreement_min_votes=5):
         import math as _m
+        if isinstance(agreement_window, bool) or not isinstance(agreement_window, int) or agreement_window < 1:
+            raise ValueError("agreement_window must be an int >= 1")
+        if isinstance(agreement_threshold, bool) or not isinstance(agreement_threshold, (int, float)) or not _m.isfinite(agreement_threshold) or not 0 <= agreement_threshold <= 1:
+            raise ValueError("agreement_threshold must be a number in [0, 1]")
+        if isinstance(agreement_min_votes, bool) or not isinstance(agreement_min_votes, int) or agreement_min_votes < 1:
+            raise ValueError("agreement_min_votes must be an int >= 1")
+        self.agreement_window, self.agreement_threshold = agreement_window, float(agreement_threshold)
+        self.agreement_min_votes = agreement_min_votes
         if isinstance(weight_floor, bool) or not isinstance(weight_floor, (int, float)) or not _m.isfinite(weight_floor) or not 0 <= weight_floor <= 1:
             raise ValueError("weight_floor must be a number in [0, 1]")
         self.weight_floor = float(weight_floor)  # 0 = off
@@ -170,18 +179,19 @@ class PeerHealth:
     def breakdown(self, endpoint):
         """{bonus, fade, dissent, weight}: weight = 0 if dead else (1 + bonus*fade) * dissent."""
         s = self._s.get(endpoint)
-        if s is None: return {"bonus": 0.0, "fade": 1.0, "dissent": 1.0, "weight": 1.0, "alive": True, "floored": False}
+        if s is None: return {"bonus": 0.0, "fade": 1.0, "dissent": 1.0, "agreement": 1.0, "weight": 1.0, "alive": True, "floored": False}
         bonus = min(s["oks"], self.weight_cap) / self.weight_cap
         fade = 1.0
         if self.half_life > 0 and bonus > 0 and "last_ok" in s:
             fade = 0.5 ** (max(0.0, self._clock() - s["last_ok"]) / self.half_life)
         dissent = self.disagree_factor(endpoint)
-        raw = (1.0 + bonus * fade) * dissent
+        agree_f = self.agreement_factor(endpoint)
+        raw = (1.0 + bonus * fade) * dissent * agree_f
         # Weight floor (AEGIS_WEIGHT_FLOOR in [0,1], 0 = off): alive peers never weigh below floor.
         # Dead peers stay 0 (liveness decides exclusion, the floor never resurrects them).
         floored = s["alive"] and raw < self.weight_floor
         w = 0.0 if not s["alive"] else max(raw, self.weight_floor)
-        return {"bonus": bonus, "fade": fade, "dissent": dissent, "weight": w, "alive": s["alive"], "floored": floored}
+        return {"bonus": bonus, "fade": fade, "dissent": dissent, "agreement": agree_f, "weight": w, "alive": s["alive"], "floored": floored}
 
     def weight(self, endpoint): return self.breakdown(endpoint)["weight"]
 
@@ -200,14 +210,40 @@ class PeerHealth:
         s = self._s.setdefault(endpoint, {"alive": True, "fails": 0, "oks": 0})
         s["disagree"] = 0 if agreed else s.get("disagree", 0) + 1
         s["votes"] = s.get("votes", 0) + 1; s["agreed"] = s.get("agreed", 0) + (1 if agreed else 0)
+        from collections import deque
+        w = s.setdefault("window", deque(maxlen=self.agreement_window)); w.append(bool(agreed))
         return s["disagree"]
+
+    # Sliding-window agreement (documented contract):
+    #   window = last W counted votes (AEGIS_AGREEMENT_WINDOW, default 20, max 1000); older votes drop out.
+    #   window_rate = agreed_in_window / len(window)   (None if no votes)
+    # Low-agreement penalty (opt-in, AEGIS_AGREEMENT_THRESHOLD = t in [0,1], 0 = off):
+    #   factor = 1                                   if t == 0, or len(window) < min_votes, or rate >= t
+    #   factor = max(0.25, window_rate / t)          otherwise  -> linear, bounded >= 1/4, never 0
+    #   min_votes = AEGIS_AGREEMENT_MIN_VOTES (default 5): sample-size guard so a new peer isn't
+    #   punished for one unlucky vote. weight = (1 + bonus*fade) * dissent * factor (then floor).
+    agreement_penalty_min = 0.25
+
+    def window_rate(self, endpoint):
+        w = self._s.get(endpoint, {}).get("window")
+        return (sum(w) / len(w)) if w else None
+
+    def agreement_factor(self, endpoint):
+        t = self.agreement_threshold
+        w = self._s.get(endpoint, {}).get("window")
+        if t <= 0 or not w or len(w) < self.agreement_min_votes: return 1.0
+        r = sum(w) / len(w)
+        return 1.0 if r >= t else max(self.agreement_penalty_min, r / t)
 
     def agreement_rates(self, endpoints):
         """{peerN: {agreed, votes, rate}} lifetime agreement with reached consensus; rate None if no votes. Ids only."""
         out = {}
         for i, e in enumerate(endpoints):
             s = self._s.get(e, {}); v = s.get("votes", 0); a = s.get("agreed", 0)
-            out[f"peer{i}"] = {"agreed": a, "votes": v, "rate": round(a / v, 6) if v else None}
+            wr = self.window_rate(e); wn = len(s.get("window", ()))
+            out[f"peer{i}"] = {"agreed": a, "votes": v, "rate": round(a / v, 6) if v else None,
+                               "window_votes": wn, "window_rate": round(wr, 6) if wr is not None else None,
+                               "window": self.agreement_window, "factor": self.agreement_factor(e)}
         return out
 
     def disagree_factor(self, endpoint):
@@ -233,7 +269,9 @@ class PeerHealth:
         return {"alive": len(alive), "dead": len(endpoints) - len(alive), "known": len(endpoints),
                 "fail_threshold": self.n, "recover_threshold": self.m,
                 "weights": self.weights(endpoints), "weight_cap": self.weight_cap, "weight_half_life": self.half_life,
-                "disagree_streaks": self.disagreements(endpoints), "disagree_cap": self.disagree_cap, "weight_floor": self.weight_floor}
+                "disagree_streaks": self.disagreements(endpoints), "disagree_cap": self.disagree_cap, "weight_floor": self.weight_floor,
+                "agreement_window": self.agreement_window, "agreement_threshold": self.agreement_threshold,
+                "agreement_min_votes": self.agreement_min_votes}
 
     def alive_endpoints(self, endpoints): return [e for e in endpoints if self.is_alive(e)]
 
@@ -282,7 +320,10 @@ def resolve_weighted(body_value, env=None):
 PEER_HEALTH = PeerHealth(_env_int("AEGIS_PEER_FAILS", 3), _env_int("AEGIS_PEER_RECOVERS", 2),
                          half_life=_env_float("AEGIS_WEIGHT_HALFLIFE", 0.0),
                          disagree_cap=_env_cap("AEGIS_DISAGREE_CAP", 4),
-                         weight_floor=_env_floor())
+                         weight_floor=_env_floor(),
+                         agreement_window=min(_env_int("AEGIS_AGREEMENT_WINDOW", 20), 1000),
+                         agreement_threshold=_env_floor("AEGIS_AGREEMENT_THRESHOLD", 0.0),
+                         agreement_min_votes=_env_int("AEGIS_AGREEMENT_MIN_VOTES", 5))
 
 
 # --- quorum collection skips dead peers (hysteresis) ---

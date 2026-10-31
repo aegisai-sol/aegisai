@@ -49,6 +49,9 @@ Horizontal coordinators sharded by task id; attestation batched; read-heavy dash
 - `AEGIS_WEIGHTED_QUORUM` — enable uptime-weighted voting (per-request `weighted` bool overrides).
 - `AEGIS_WEIGHT_HALFLIFE` — idle-fade of uptime bonus, seconds (0 = off).
 - `AEGIS_DISAGREE_CAP` — max halvings for consecutive dissent (default 4, 0 = off, clamp 16).
+- `AEGIS_AGREEMENT_WINDOW` — sliding window of last W counted votes for per-peer `window_rate` (default 20, max 1000); older votes drop out.
+- `AEGIS_AGREEMENT_THRESHOLD` — opt-in low-agreement penalty t in [0,1] (default 0 = off): if `window_rate < t`, weight *= `max(0.25, window_rate / t)`.
+- `AEGIS_AGREEMENT_MIN_VOTES` — sample-size guard; penalty only applies once the window holds >= N votes (default 5).
 - `AEGIS_WEIGHT_FLOOR` — minimum weight for an *alive* peer, float in [0,1] (default 0 = off; >1 clamps to 1; invalid → 0). Dead peers stay 0. Breakdown reports `floored: true` when applied.
 - `AEGIS_MIN_STRENGTH` — float in [0,1] (default 0 = off; >1 clamps to 1; invalid → 0). A VALID/VALID_VERDICT round with `quorum_strength` below it is downgraded to `NO_CONSENSUS` (`reason: low_strength`, `downgraded_from`), and the receipt digest reflects the downgrade.
 - `AEGIS_STRENGTH_WINDOW` — rolling window of recent rounds for `/v1/health.quorum_strength` {latest, avg, min, samples, window, rounds, downgraded, min_strength} (default 20, clamp 1..1000; strengths only, no URLs/claims).

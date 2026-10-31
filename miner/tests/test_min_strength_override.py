@@ -21,7 +21,8 @@ def test_env_source():
 def test_agreement_rates():
     h=c.PeerHealth(); h.observe_vote("a",True); h.observe_vote("a",False); h.observe_vote("a",True)
     r=h.agreement_rates(["a","b"])
-    assert r["peer0"]=={"agreed":2,"votes":3,"rate":round(2/3,6)} and r["peer1"]=={"agreed":0,"votes":0,"rate":None}
+    sub=lambda d:{k:d[k] for k in ("agreed","votes","rate")}
+    assert sub(r["peer0"])=={"agreed":2,"votes":3,"rate":round(2/3,6)} and sub(r["peer1"])=={"agreed":0,"votes":0,"rate":None}
 def test_health_peer_agreement_ids_only(monkeypatch):
     monkeypatch.setenv("AEGIS_PEERS","http://x:1,http://y:2")
     a=coordinator.health()["peer_agreement"]
