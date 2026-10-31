@@ -1,6 +1,6 @@
 {
   "project": "AegisAI PoV-R",
-  "updated_at": "2026-10-31T03:52:24+02:00",
+  "updated_at": "2026-10-31T04:06:52+02:00",
   "milestones": [
     {
       "id": "decompose",
@@ -121,6 +121,24 @@
       "detail": "70% miners / 20% reservoir / 5% treasury / 5% burn, integer-exact, flagged -> reservoir. No token"
     },
     {
+      "id": "canaries-v2",
+      "title": "Canaries v2: FALSE traps (2 per verify)",
+      "status": "done",
+      "updated_at": "2026-10-31T04:06:52+02:00",
+      "note": "CANARY_POOL_V2 + make_canaries(n=2); always-TRUE miner caught; 96deefd",
+      "commit": "96deefd",
+      "detail": "CANARY_POOL_V2 + make_canaries(n=2); always-TRUE miner caught; 96deefd"
+    },
+    {
+      "id": "peer-liveness",
+      "title": "Peer handshake /v1/peers/ping + health.peer_liveness",
+      "status": "done",
+      "updated_at": "2026-10-31T04:06:52+02:00",
+      "note": "Timeouts, latency, last_ok; no peer URLs leaked; 96deefd",
+      "commit": "96deefd",
+      "detail": "Timeouts, latency, last_ok; no peer URLs leaked; 96deefd"
+    },
+    {
       "id": "mint-reservoir",
       "title": "AGIS mint + Reservoir on-chain",
       "status": "blocked",
@@ -134,9 +152,9 @@
   "counts": {
     "active": 1,
     "blocked": 1,
-    "done": 13,
+    "done": 15,
     "next": 0,
-    "total": 15
+    "total": 17
   },
   "active_progress": 80
 }
