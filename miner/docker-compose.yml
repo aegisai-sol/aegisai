@@ -1,0 +1,12 @@
+# Two-node local quorum demo. node-a asks node-b for an independent fetch via AEGIS_PEERS.
+# Usage: docker compose up --build ; then
+#   curl -XPOST localhost:8787/v1/consensus -d '{"url":"https://example.com/","claim":"example domain"}'
+services:
+  node-a:
+    build: .
+    ports: ["8787:8787"]
+    environment:
+      AEGIS_PEERS: "http://node-b:8787"
+  node-b:
+    build: .
+    ports: ["8788:8787"]

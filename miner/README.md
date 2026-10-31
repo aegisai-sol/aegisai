@@ -20,3 +20,13 @@ Simulated scores have **no monetary value**; rewards/consensus are not live.
 ## Public verify demo (PoV-R)
 `scripts/run_public_demo.sh` starts the stdlib coordinator on :8787 (`POST /v1/verify`, `GET /v1/receipts/<id>`, `GET /v1/credits/<id>`) and prints a cloudflared/ngrok hint. Point the site at it: `verify.html?coordinator=https://<tunnel>`.
 Checks: numbered/bullet list splitting · arithmetic (exact) · source quote match (fetch + sha256) · URL-only → page title + hash + UNSURE "no quote to match", unreachable → FALSE · one calibration canary per batch (wrong canary vote ⇒ receipt flagged, 0 credits).
+
+## Peer node (Docker) — multi-node quorum
+`miner/Dockerfile` runs the stdlib coordinator as a node; `miner/docker-compose.yml` starts two (`node-a`, `node-b`). `AEGIS_PEERS` is a comma-separated list of peer base URLs; `POST /v1/consensus` on a node fetches locally and asks each peer (`/v1/fetch-check`) independently, then returns `status` = `VALID` / `VALID_VERDICT` / `HASH_ONLY` / `NO_CONSENSUS` with `quorum=2`.
+
+```bash
+cd miner && docker compose up --build
+curl -XPOST localhost:8787/v1/consensus -d '{"url":"https://example.com/","claim":"example domain"}'
+# a second machine: docker build -t aegis-node . && docker run -p 8787:8787 -e AEGIS_PEERS=http://<other-host>:8787 aegis-node
+```
+No secrets, no keypairs, no Solana submit in the image. Data lives in the `/data` volume.
