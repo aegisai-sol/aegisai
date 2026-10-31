@@ -112,3 +112,92 @@ def verify_card(card, trusted_pubkeys, revocations=None):
         return {"ok": True, "reason": None, "signer": pk}
     except Exception as e:
         return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
+
+ROTATE_SCHEME = "pov-r/key-rotate/1"
+MAX_ROTATION_DEPTH = 16
+
+def rotate_message(old_pubkey, new_pubkey, effective_at):
+    core = {"old_pubkey": old_pubkey, "new_pubkey": new_pubkey, "effective_at": effective_at}
+    return ROTATE_SCHEME.encode() + b"\n" + json.dumps(core, sort_keys=True, separators=(",", ":")).encode()
+
+def _num(x): return not isinstance(x, bool) and isinstance(x, (int, float)) and x >= 0
+
+def make_rotation(old_seed_hex, new_seed_hex, effective_at):
+    """Planned key rotation with dual signatures: the OLD key endorses the successor (so a verifier that only pinned
+    the old key can follow the chain offline, no re-distribution of trust), and the NEW key countersigns (proof of
+    possession, so nobody can 'rotate' onto a key they don't hold). From effective_at the old key may no longer sign
+    cards (implicit retirement) and the new key is trusted only for cards with ts >= effective_at. Raises ValueError."""
+    ed, _ = _ed()
+    if ed is None: raise ValueError("ed25519 unavailable (install cryptography)")
+    if not _hexn(old_seed_hex, 64) or not _hexn(new_seed_hex, 64): raise ValueError("bad seed")
+    if old_seed_hex == new_seed_hex: raise ValueError("new key must differ from old key")
+    if not _num(effective_at): raise ValueError("bad effective_at")
+    op, np_ = pubkey_from_seed(old_seed_hex), pubkey_from_seed(new_seed_hex)
+    msg = rotate_message(op, np_, effective_at)
+    sign = lambda s: ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(s)).sign(msg).hex()
+    return {"scheme": ROTATE_SCHEME, "old_pubkey": op, "new_pubkey": np_, "effective_at": effective_at,
+            "old_sig": sign(old_seed_hex), "new_sig": sign(new_seed_hex)}
+
+def check_rotation(rot):
+    """Return (old_pubkey, new_pubkey, effective_at) for a valid dual-signed rotation, else None. Never raises."""
+    try:
+        if not isinstance(rot, dict) or rot.get("scheme") != ROTATE_SCHEME: return None
+        op, np_, at = rot.get("old_pubkey"), rot.get("new_pubkey"), rot.get("effective_at")
+        if not _hexn(op, 64) or not _hexn(np_, 64) or op == np_ or not _num(at): return None
+        if not _hexn(rot.get("old_sig"), 128) or not _hexn(rot.get("new_sig"), 128): return None
+        ed, _ = _ed()
+        if ed is None: return None
+        msg = rotate_message(op, np_, at)
+        for pk, sig in ((op, rot["old_sig"]), (np_, rot["new_sig"])):
+            ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(sig), msg)
+        return op, np_, at
+    except Exception:
+        return None
+
+def resolve_trust(trusted_pubkeys, rotations=None, revocations=None):
+    """Expand pinned root keys along valid rotations. Returns {pubkey: (not_before, not_after)} validity windows
+    (None = open). Rules: invalid rotations ignored; a key revoked as 'compromised' endorses nothing (an attacker
+    holding it could mint successors); first valid rotation per old key wins deterministically (earliest
+    effective_at, then new_pubkey) so a forked chain can't widen trust; depth capped; cycles ignored. Never raises."""
+    try:
+        win = {k.lower(): (None, None) for k in (trusted_pubkeys or []) if isinstance(k, str) and _hexn(k.lower(), 64)}
+        bad = {c[0] for c in (check_revocation(r) for r in revocations or []) if c and c[1] == "compromised"}
+        edges = {}
+        for r in rotations or []:
+            c = check_rotation(r)
+            if c and c[0] not in bad:
+                cur = edges.get(c[0])
+                if cur is None or (c[2], c[1]) < (cur[1], cur[0]): edges[c[0]] = (c[1], c[2])
+        frontier = list(win)
+        for _ in range(MAX_ROTATION_DEPTH):
+            nxt = []
+            for old in frontier:
+                if old not in edges: continue
+                new, at = edges[old]
+                nb, na = win[old]
+                if na is not None and at >= na: continue  # old key already expired before it could rotate
+                win[old] = (nb, at)
+                if new not in win: win[new] = (at, None); nxt.append(new)
+            frontier = nxt
+            if not frontier: break
+        return win
+    except Exception:
+        return {}
+
+def verify_card_chain(card, trusted_pubkeys, rotations=None, revocations=None):
+    """verify_card that follows pov-r/key-rotate/1 chains from the pinned keys and enforces each key's
+    validity window on the card ts. Returns {ok, reason, signer, chain_depth}; never raises."""
+    try:
+        win = resolve_trust(trusted_pubkeys, rotations, revocations)
+        if not win: return {"ok": False, "reason": "no valid trusted pubkey"}
+        v = verify_card(card, list(win), revocations)
+        if not v.get("ok"): return v
+        nb, na = win[v["signer"]]
+        if nb is not None or na is not None:
+            ts = card.get("ts")
+            if not _num(ts): return {"ok": False, "reason": "card ts required for rotated key", "signer": v["signer"]}
+            if nb is not None and ts < nb: return {"ok": False, "reason": "card predates signer key", "signer": v["signer"]}
+            if na is not None and ts >= na: return {"ok": False, "reason": "signer key rotated out before card ts", "signer": v["signer"]}
+        return {**v, "rotated": nb is not None}
+    except Exception as e:
+        return {"ok": False, "reason": f"malformed: {type(e).__name__}"}

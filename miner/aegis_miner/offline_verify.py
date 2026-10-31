@@ -39,7 +39,7 @@ def _card_pins(card):
         return None, None, None, "proof card self-audit not intact"
     return root, n, rid, None
 
-def verify_offline(obj, card=None, root=None, leaf_count=None, pubkeys=None, revocations=None):
+def verify_offline(obj, card=None, root=None, leaf_count=None, pubkeys=None, revocations=None, rotations=None):
     """Verify any disclosure kind against trusted pins (card and/or explicit root/leaf_count).
     pubkeys: trusted coordinator card keys (hex). When given, the card MUST carry a valid Ed25519 attestation
     from one of them (pov-r/card-attest/1), so a forged card cannot vouch for a forged disclosure.
@@ -50,7 +50,7 @@ def verify_offline(obj, card=None, root=None, leaf_count=None, pubkeys=None, rev
         signer = None
         if pubkeys:
             if card is None: return {"ok": False, "trusted": False, "kind": kind, "reason": "--pubkey needs a proof card"}
-            sv = ca.verify_card(card, pubkeys, revocations)
+            sv = ca.verify_card_chain(card, pubkeys, rotations, revocations)
             if not sv["ok"]: return {"ok": False, "trusted": False, "kind": kind, "reason": f"card attestation: {sv['reason']}", "card_signed": False}
             signer = sv["signer"]
         croot, cn, crid, err = _card_pins(card)
@@ -95,14 +95,16 @@ def main(argv=None):
     p.add_argument("--root"); p.add_argument("--leaf-count", type=int)
     p.add_argument("--pubkey", action="append", help="trusted coordinator card key (hex, GET /v1/card-key); repeatable; card must be signed by one")
     p.add_argument("--revocation", action="append", help="self-signed key revocation JSON (pov-r/key-revoke/1); repeatable")
+    p.add_argument("--rotation", action="append", help="dual-signed key rotation JSON (pov-r/key-rotate/1); repeatable, followed from --pubkey")
     p.add_argument("--allow-untrusted", action="store_true", help="exit 0 on ok even without pinned root/leaf_count")
     a = p.parse_args(argv)
     try:
         obj = _load(a.disclosure); card = _load(a.card) if a.card else None
         revs = [_load(x) for x in a.revocation or []]
+        rots = [_load(x) for x in a.rotation or []]
     except (OSError, ValueError) as e:
         print(json.dumps({"ok": False, "trusted": False, "reason": f"cannot read input: {e}"})); return 2
-    r = verify_offline(obj, card, a.root, a.leaf_count, a.pubkey, revs)
+    r = verify_offline(obj, card, a.root, a.leaf_count, a.pubkey, revs, rots)
     print(json.dumps(r, indent=2, sort_keys=True))
     return 0 if r["ok"] and (r["trusted"] or a.allow_untrusted) else 1
 
