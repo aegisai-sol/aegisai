@@ -36,6 +36,30 @@ def mac_ok(rec, secret=None):
     got = rec.get("mac")
     return isinstance(got, str) and _hm.compare_digest(got, want)
 
+def audit_receipt(rec, secret=None, store_dir=None):
+    """Third-party integrity audit of a presented receipt body (no side effects, secret never returned).
+    digest_ok: rec['digest'] recomputes; mac: absent|valid|invalid|unchecked(no key here);
+    known: stored copy with same id has the same digest (None if no store / not found);
+    intact: digest_ok and mac not invalid/required-missing and known is not False."""
+    if not isinstance(rec, dict) or not isinstance(rec.get("receipt_id"), str):
+        raise ValueError("receipt object with receipt_id required")
+    want = receipt_digest(rec)
+    digest_ok = rec.get("digest") == want
+    k = secret if secret is not None else hmac_secret()
+    if not k: mac = "unchecked" if "mac" in rec else "absent"
+    elif "mac" not in rec: mac = "missing"
+    else: mac = "valid" if mac_ok(rec, k) else "invalid"
+    known = None
+    rid = rec["receipt_id"]
+    if store_dir and rid.isalnum():
+        f = os.path.join(store_dir, rid + ".json")
+        if os.path.exists(f):
+            try: known = json.load(open(f)).get("digest") == rec.get("digest")
+            except Exception: known = False
+    intact = digest_ok and mac not in ("invalid", "missing") and known is not False
+    return {"receipt_id": rid, "intact": intact, "digest_ok": digest_ok, "mac": mac, "known": known,
+            "protocol_version": rec.get("protocol_version")}
+
 class TokenState:
     mode = "abstract"
     def mint(self): return None

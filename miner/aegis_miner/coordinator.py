@@ -57,7 +57,7 @@ def list_receipts(limit=20, offset=0):
     return {"total": len(ids), "limit": limit, "offset": offset, "next_offset": nxt, "items": items}
 from aegis_miner.ratelimit import RateLimiter
 LIMITER = RateLimiter.from_env()
-RATE_LIMITED = ("/v1/verify", "/v1/fee-preview", "/v1/gate/batch")
+RATE_LIMITED = ("/v1/verify", "/v1/fee-preview", "/v1/gate/batch", "/v1/receipts/verify")
 OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version": "0.1.0",
            "description": "Proof-of-Source verification coordinator (devnet/testing; no mainnet token)."},
            "paths": {p: {m: {"summary": d, "responses": {"200": {"description": "OK"}, **({"429": {"description": "Rate limited (Retry-After header)"}} if p in RATE_LIMITED else {})}}}
@@ -70,6 +70,7 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
                                      ("/v1/health", "get", "Coordinator health"), ("/v1/peers/ping", "get", "Probe peer liveness (ids only, no URLs)"),
                                      ("/v1/receipts", "get", "Paginated receipt summaries (limit, offset)"),
                                      ("/v1/receipts/{id}", "get", "Single receipt"),
+                                     ("/v1/receipts/verify", "post", "Audit a presented receipt: digest recompute, HMAC, matches stored copy"),
                                      ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
                                      ("/v1/metrics", "get", "Counters: verify_count, fee_preview_count, rate_limit_hits"),
                                      ("/v1/openapi.json", "get", "This document"))}}
@@ -140,6 +141,11 @@ class H(BaseHTTPRequestHandler):
             try:
                 b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 return self._send(200, gate.decide_batch(b.get("action"), RECEIPTS, b.get("claims"), nonce=b.get("nonce")))
+            except Exception as e: return self._send(400, {"error": str(e)[:200]})
+        if self.path == "/v1/receipts/verify":
+            try:
+                b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                return self._send(200, token_bridge.audit_receipt(b.get("receipt", b), store_dir=RECEIPTS))
             except Exception as e: return self._send(400, {"error": str(e)[:200]})
         if self.path == "/v1/gate":
             from . import gate
