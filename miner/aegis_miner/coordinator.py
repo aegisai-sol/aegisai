@@ -1,7 +1,7 @@
 """Mock coordinator API (stdlib). GET /api/stats, POST /api/vote, GET /api/votes. CORS open for local dev.
 Run: python3 -m aegis_miner.coordinator [port=8787]. Replace with a real service + Solana indexer later."""
 import json, os, random, sys, time, uuid
-from aegis_miner import verify, credits
+from aegis_miner import verify, credits, token_bridge
 DATA = os.environ.get("AEGIS_DATA", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"))
 RECEIPTS, CREDITS = os.path.join(DATA, "receipts"), os.path.join(DATA, "credits.jsonl")
 RESERVOIR_NOTE = "Proof Credits are non-transferable; AGIS conversion only vs paid fees, capped <=70% fees / <=0.5% Reservoir per period. No mint yet (Option A)."
@@ -30,6 +30,12 @@ class H(BaseHTTPRequestHandler):
         elif self.path.startswith("/v1/credits/"):
             cid = self.path.split("/v1/credits/", 1)[1]
             self._send(200, {"client_id": cid, "credits": credits.balance(CREDITS, cid)})
+        elif self.path.startswith("/v1/claim-quote/"):
+            cid = self.path.split("/v1/claim-quote/", 1)[1]
+            tot = sum(e["credits"] for e in map(json.loads, open(CREDITS))) if os.path.exists(CREDITS) else 0
+            self._send(200, token_bridge.claim_quote(CREDITS, cid, tot, token_bridge.state_from_env()))
+        elif self.path == "/v1/token-state":
+            st = token_bridge.state_from_env(); self._send(200, {"mode": st.mode, "mint": st.mint()})
         elif self.path == "/api/votes": self._send(200, VOTES[-100:])
         else: self._send(404, {"error": "not found"})
     def do_POST(self):
@@ -53,6 +59,7 @@ class H(BaseHTTPRequestHandler):
         rec = {"receipt_id": rid, "client_id": cid, "ts": time.time(), "claims": claims,
                "credits_awarded": n, "calibration": {"ok": ok, "failed": bad},
                "flagged": not ok, "reservoir_note": RESERVOIR_NOTE, "onchain": "PENDING (devnet memo later)"}
+        rec["digest"] = token_bridge.receipt_digest(rec)
         os.makedirs(RECEIPTS, exist_ok=True); json.dump(rec, open(os.path.join(RECEIPTS, rid + ".json"), "w"))
         self._send(200, rec)
     def log_message(self, *a): pass

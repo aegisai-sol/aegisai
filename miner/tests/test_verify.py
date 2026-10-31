@@ -75,3 +75,16 @@ def test_ssrf_guard():
     import pytest
     with pytest.raises(ValueError): verify.fetch_page("http://127.0.0.1:1/")
     with pytest.raises(ValueError): verify.fetch_page("file:///etc/passwd")
+
+
+def test_token_bridge(tmp_path):
+    from aegis_miner import token_bridge as tb
+    p = str(tmp_path / "c.jsonl"); credits.award(p, "a", "r", [{"vote": "TRUE", "confidence": .9}] * 3)
+    q = tb.claim_quote(p, "a", 3, tb.OffchainState())
+    assert q["credits"] == 3 and q["claimable_agis"] == 0 and tb.claim_intent(q, "W") is None
+    class Live(tb.OffchainState):
+        def mint(self): return "MINT"
+    q = tb.claim_quote(p, "a", 6, Live(fees_usd=100, price_usd=0.01))
+    assert abs(q["claimable_agis"] - min(.7 * 100 / .01, .005 * tb.RESERVOIR_SUPPLY) / 2) < 1e-6
+    assert tb.claim_intent(q, "W")["signed"] is False
+    assert tb.receipt_digest({"receipt_id": "x", "claims": []}) == tb.receipt_digest({"claims": [], "receipt_id": "x", "ts": 1})
