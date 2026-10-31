@@ -57,3 +57,12 @@ When a job reaches `verified`/`failed`, the claim server sends one **Solana Memo
 - No keypair or payer SOL < 0.003 → `receiptTx:null` + `receiptError`; the vote still succeeds. Disable with `RWA_MEMO=0`.
 - Only hash + status + time go on chain; file content never does. Private mode sends an AES-GCM ciphertext to miners; public anchor sends the hash only.
 - Cost ≈ 5,000 lamports per seal (base fee).
+
+## RWA seal privacy (v1.1)
+- File is hashed (SHA-256) and, in Private mode (default), encrypted with AES-256-GCM **in the browser** before it leaves the device. Filename and MIME are inside the encrypted envelope.
+- Server/miners store and see only: ciphertext, fingerprint, IV, coarse type, size. Miners vote without decrypting.
+- Server rejects any key/secret/password/plaintext field. We never hold the key; lost key = unrecoverable.
+- On-chain: permanent Solana Memo `AEGIS/rwa/v1|sealId|fingerprint|status` — no expiry, no personal data.
+- Retrieve: user enters Seal ID + key → page GETs `/api/rwa/jobs/:id?full=1` (ciphertext) → decrypts locally → re-checks fingerprint → preview via blob URL. The key is never sent.
+- localStorage keeps seal IDs; keys only if the user ticks "save key on this device". Sharing = user gives key off-platform.
+- GDPR: uploader is controller; only ciphertext off-chain (deletable), hash on-chain.
