@@ -53,12 +53,24 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
                                      ("/v1/receipts", "get", "Paginated receipt summaries (limit, offset)"),
                                      ("/v1/receipts/{id}", "get", "Single receipt"),
                                      ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
+                                     ("/v1/metrics", "get", "Counters: verify_count, fee_preview_count, rate_limit_hits"),
                                      ("/v1/openapi.json", "get", "This document"))}}
+METRICS = {"verify_count": 0, "fee_preview_count": 0, "rate_limit_hits": 0}
+def cors_origin(origin, spec=None):
+    """AEGIS_CORS_ORIGINS: comma list of allowed origins; unset/empty/'*' = '*' (demo). Returns header value or None."""
+    spec = (os.environ.get("AEGIS_CORS_ORIGINS", "") if spec is None else spec).strip()
+    if not spec or spec == "*": return "*"
+    allowed = {o.strip().rstrip("/") for o in spec.split(",") if o.strip()}
+    return origin if origin and origin.rstrip("/") in allowed else None
 class H(BaseHTTPRequestHandler):
     def _send(self, code, obj, headers=()):
         b = json.dumps(obj).encode(); self.send_response(code)
         for k, v in headers: self.send_header(k, v)
-        for k, v in (("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*"), ("Access-Control-Allow-Headers", "Content-Type")): self.send_header(k, v)
+        self.send_header("Content-Type", "application/json")
+        ao = cors_origin(self.headers.get("Origin"))
+        if ao:
+            self.send_header("Access-Control-Allow-Origin", ao); self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            if ao != "*": self.send_header("Vary", "Origin")
         self.end_headers(); self.wfile.write(b)
     def do_OPTIONS(self): self._send(204, {})
     def do_GET(self):
@@ -91,14 +103,15 @@ class H(BaseHTTPRequestHandler):
             st = token_bridge.state_from_env(); self._send(200, {"mode": st.mode, "mint": st.mint()})
         elif self.path == "/v1/health": self._send(200, health())
         elif self.path == "/v1/openapi.json": self._send(200, OPENAPI)
+        elif self.path == "/v1/metrics": self._send(200, dict(METRICS))
         elif self.path == "/api/votes": self._send(200, VOTES[-100:])
         else: self._send(404, {"error": "not found"})
     def do_POST(self):
         if self.path in RATE_LIMITED:
             ok, retry = LIMITER.check(self.client_address[0])
-            if not ok: return self._send(429, {"error": "rate limited", "retry_after": retry}, (("Retry-After", str(retry)),))
-        if self.path == "/v1/verify": return self._verify()
-        if self.path == "/v1/fee-preview": return self._fee_preview()
+            if not ok: METRICS["rate_limit_hits"] += 1; return self._send(429, {"error": "rate limited", "retry_after": retry}, (("Retry-After", str(retry)),))
+        if self.path == "/v1/verify": METRICS["verify_count"] += 1; return self._verify()
+        if self.path == "/v1/fee-preview": METRICS["fee_preview_count"] += 1; return self._fee_preview()
         if self.path in ("/v1/fetch-check", "/v1/consensus"):
             from . import verify as _v, consensus as _c
             try: b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)))); url, claim = b["url"], b.get("claim", "")

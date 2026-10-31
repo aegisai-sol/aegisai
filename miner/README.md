@@ -30,3 +30,5 @@ curl -XPOST localhost:8787/v1/consensus -d '{"url":"https://example.com/","claim
 # a second machine: docker build -t aegis-node . && docker run -p 8787:8787 -e AEGIS_PEERS=http://<other-host>:8787 aegis-node
 ```
 No secrets, no keypairs, no Solana submit in the image. Data lives in the `/data` volume.
+
+**Coordinator ops:** `AEGIS_RATE_LIMIT=N/SEC` (e.g. `30/60`, per-IP on `/v1/verify` + `/v1/fee-preview`, off by default) · `AEGIS_CORS_ORIGINS=https://a,https://b` (default `*`) · spec at `GET /v1/openapi.json` · counters at `GET /v1/metrics`.
