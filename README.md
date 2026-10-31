@@ -86,3 +86,13 @@ but those are reputation only (non-transferable, never AGIS). There is no shared
 diluted by other jobs. Settling uses up that miner's credits on that receipt once and returns an Ed25519-signed AGIS
 claim voucher bound to miner + receipt + job fee + amount; tampering, double settle, or paying more than the job's
 miner share all fail. (`miner/aegis_miner/credit_settle.py`; library only, no mint.)
+
+## Mining creates AGIS (pov-r/mine-emit/1)
+
+- Max supply: **1,000,000,000 AGIS** on Solana. Nobody can make more.
+- **85% (850M) is created only by mining** — over time, as miners do work.
+- **10% (100M) team**, released slowly. **5% (50M) ecosystem / trading pool.**
+- Mining reward **halves about every 2 years**, like Bitcoin. Early miners earn most.
+- **Wallet first:** open a wallet (Phantom, Trust, …), connect your device, your AI agent checks texts, and AGIS goes to your wallet.
+- Staking is optional: it makes your miner faster (up to 2x), it does not replace the reward.
+- `miner/aegis_miner/mine_emit.py` lets anyone preview rewards. It does not mint anything yet.
