@@ -449,7 +449,7 @@ def make_witness(seed_hex, card):
     sig = ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex)).sign(witness_message(card, pk)).hex()
     return {"scheme": WITNESS_SCHEME, "pubkey": pk, "receipt_id": card.get("receipt_id"), "digest": card.get("digest"), "sig": sig}
 
-def check_witnesses(card, witnesses, witness_pubkeys, threshold, revocations=None):
+def check_witnesses(card, witnesses, witness_pubkeys, threshold, revocations=None, dissents=None, max_dissent=0):
     """Count distinct trusted witnesses that validly co-signed this card. Returns {ok, count, threshold, signers,
     reason}; never raises. Rules: only keys in witness_pubkeys count (strangers can't pad the count); each key counts
     once (duplicates ignored); the card's own coordinator key never counts as a witness (independence); a witness key
@@ -482,8 +482,78 @@ def check_witnesses(card, witnesses, witness_pubkeys, threshold, revocations=Non
             try: ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(sig), witness_message(card, pk))
             except Exception: continue
             good.add(pk)
+        d = check_dissents(card, dissents, witness_pubkeys, revocations) if dissents else {"dissenters": [], "reasons": {}}
+        dis = set(d["dissenters"])
+        good -= dis  # a witness that both co-signed and dissented has equivocated: its approval is void
         n = len(good)
-        return {"ok": n >= threshold, "count": n, "threshold": threshold, "signers": sorted(good),
-                "reason": None if n >= threshold else f"only {n} of {threshold} required witnesses"}
+        out = {"ok": n >= threshold, "count": n, "threshold": threshold, "signers": sorted(good),
+               "reason": None if n >= threshold else f"only {n} of {threshold} required witnesses",
+               "dissenters": sorted(dis), "dissent_reasons": d["reasons"]}
+        if not _int(max_dissent): max_dissent = 0
+        if len(dis) > max_dissent:
+            out.update(ok=False, reason=f"disputed: {len(dis)} trusted witness dissent(s) > max_dissent {max_dissent}")
+        return out
     except Exception as e:
-        return {"ok": False, "count": 0, "threshold": threshold, "signers": [], "reason": f"malformed: {type(e).__name__}"}
+        return {"ok": False, "count": 0, "threshold": threshold, "signers": [], "reason": f"malformed: {type(e).__name__}",
+                "dissenters": [], "dissent_reasons": {}}
+
+DISSENT_SCHEME = "pov-r/card-dissent/1"
+DISSENT_REASONS = ("source_mismatch", "claim_unsupported", "replay_mismatch", "calibration_failed")
+MAX_DISSENTS = 64
+
+def dissent_message(card, witness_pubkey, reason):
+    """Bytes a dissenting witness signs: same binding as a co-signature (pinned core + coordinator + witness) plus the
+    reason, under its own domain so a dissent can never be replayed as an approval or an attestation (and vice versa)."""
+    core = card_message(card)[len(SCHEME) + 1:].decode()
+    at = card.get("attestation") if isinstance(card.get("attestation"), dict) else {}
+    meta = {"coordinator": at.get("pubkey"), "witness": witness_pubkey, "reason": reason}
+    return DISSENT_SCHEME.encode() + b"\n" + core.encode() + b"\n" + _canon(meta).encode()
+
+def make_dissent(seed_hex, card, reason):
+    """Signed witness dissent: a validator that re-checked the receipt and got a DIFFERENT result says so, verifiably.
+    Without it a k-of-n quorum only ever shows approvals, so a coordinator can quietly collect k friendly witnesses
+    while the others' objections vanish. A dissent travels with the card and turns the verdict into 'disputed'.
+    Raises ValueError on bad input."""
+    ed, _ = _ed()
+    if ed is None: raise ValueError("ed25519 unavailable (install cryptography)")
+    if not _hexn(seed_hex, 64): raise ValueError("bad seed")
+    if not isinstance(card, dict) or not isinstance(card.get("attestation"), dict): raise ValueError("card must be attested")
+    if reason not in DISSENT_REASONS: raise ValueError("reason must be one of " + "|".join(DISSENT_REASONS))
+    pk = pubkey_from_seed(seed_hex)
+    sig = ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex)).sign(dissent_message(card, pk, reason)).hex()
+    return {"scheme": DISSENT_SCHEME, "pubkey": pk, "receipt_id": card.get("receipt_id"), "digest": card.get("digest"),
+            "reason": reason, "sig": sig}
+
+def check_dissents(card, dissents, witness_pubkeys, revocations=None):
+    """Return {dissenters, reasons} for distinct trusted witnesses that validly dissented on this card; never raises.
+    Same trust rules as check_witnesses: strangers and the coordinator itself don't count, duplicates count once,
+    a 'compromised' witness key is ignored (an attacker can't smear a card with a stolen key), a 'retired' key only
+    for cards with ts < revoked_at, and a dissent bound to another card/coordinator/reason fails."""
+    try:
+        if not isinstance(card, dict): return {"dissenters": [], "reasons": {}}
+        at = card.get("attestation") if isinstance(card.get("attestation"), dict) else {}
+        coord = at.get("pubkey")
+        keys = {k.lower() for k in (witness_pubkeys or []) if isinstance(k, str) and _hexn(k.lower(), 64)} - {coord}
+        ed, _ = _ed()
+        if ed is None or not keys: return {"dissenters": [], "reasons": {}}
+        dead, retired = set(), {}
+        for rv in revocations or []:
+            c = check_revocation(rv)
+            if c is None: continue
+            if c[1] == "compromised": dead.add(c[0])
+            else: retired[c[0]] = min(c[2], retired.get(c[0], c[2]))
+        ts = card.get("ts")
+        found = {}
+        for w in list(dissents or [])[:MAX_DISSENTS]:
+            if not isinstance(w, dict) or w.get("scheme") != DISSENT_SCHEME: continue
+            pk, sig, reason = w.get("pubkey"), w.get("sig"), w.get("reason")
+            if not _hexn(pk, 64) or not _hexn(sig, 128) or pk not in keys or pk in found or pk in dead: continue
+            if reason not in DISSENT_REASONS: continue
+            if pk in retired and (isinstance(ts, bool) or not isinstance(ts, (int, float)) or ts >= retired[pk]): continue
+            if w.get("receipt_id") != card.get("receipt_id") or w.get("digest") != card.get("digest"): continue
+            try: ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(sig), dissent_message(card, pk, reason))
+            except Exception: continue
+            found[pk] = reason
+        return {"dissenters": sorted(found), "reasons": dict(sorted(found.items()))}
+    except Exception:
+        return {"dissenters": [], "reasons": {}}
