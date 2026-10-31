@@ -44,17 +44,28 @@ def weighting_summary(env=None):
     if hl > 0: w["half_life"] = hl
     if consensus.PEER_HEALTH.weight_floor > 0: w["weight_floor"] = consensus.PEER_HEALTH.weight_floor
     return w
-def list_receipts(limit=20, offset=0):
-    """Newest-first page of receipt summaries (id, mtime, status). No bodies, so pages stay small."""
+def list_receipts(limit=20, offset=0, status=None, since=None):
+    """Newest-first page of receipt summaries (id, mtime, status). No bodies, so pages stay small.
+    Optional filters: status (case-insensitive match on status/verdict), since (mtime >= epoch seconds).
+    Filters apply before pagination so total/next_offset describe the filtered set."""
     ids = sorted((f for f in (os.listdir(RECEIPTS) if os.path.isdir(RECEIPTS) else []) if f.endswith(".json")),
                  key=lambda f: (-os.path.getmtime(os.path.join(RECEIPTS, f)), f))
-    items = []
-    for f in ids[offset:offset + limit]:
+    if since is not None: ids = [f for f in ids if os.path.getmtime(os.path.join(RECEIPTS, f)) >= since]
+    def summ(f):
         try: r = json.load(open(os.path.join(RECEIPTS, f)))
         except Exception: r = {}
-        items.append({"receipt_id": f[:-5], "status": r.get("status") or r.get("verdict"), "mtime": int(os.path.getmtime(os.path.join(RECEIPTS, f)))})
-    nxt = offset + limit if offset + limit < len(ids) else None
-    return {"total": len(ids), "limit": limit, "offset": offset, "next_offset": nxt, "items": items}
+        if not isinstance(r, dict): r = {}
+        return {"receipt_id": f[:-5], "status": r.get("status") or r.get("verdict"), "mtime": int(os.path.getmtime(os.path.join(RECEIPTS, f)))}
+    if status is not None:
+        want = status.upper(); rows = [x for x in map(summ, ids) if str(x["status"] or "").upper() == want]
+        page = rows[offset:offset + limit]; total = len(rows)
+    else:
+        page = [summ(f) for f in ids[offset:offset + limit]]; total = len(ids)
+    nxt = offset + limit if offset + limit < total else None
+    out = {"total": total, "limit": limit, "offset": offset, "next_offset": nxt, "items": page}
+    flt = {k: v for k, v in (("status", status.upper() if status else None), ("since", since)) if v is not None}
+    if flt: out["filters"] = flt
+    return out
 from aegis_miner.ratelimit import RateLimiter
 LIMITER = RateLimiter.from_env()
 RATE_LIMITED = ("/v1/verify", "/v1/fee-preview", "/v1/gate/batch", "/v1/receipts/verify")
@@ -68,7 +79,7 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
                                      ("/v1/fetch-check", "post", "Fetch-only source check"),
                                      ("/v1/consensus", "post", "Multi-node quorum verify"),
                                      ("/v1/health", "get", "Coordinator health"), ("/v1/peers/ping", "get", "Probe peer liveness (ids only, no URLs)"),
-                                     ("/v1/receipts", "get", "Paginated receipt summaries (limit, offset)"),
+                                     ("/v1/receipts", "get", "Paginated receipt summaries (limit, offset, status, since filters)"),
                                      ("/v1/receipts/{id}", "get", "Single receipt"),
                                      ("/v1/receipts/verify", "post", "Audit a presented receipt: digest recompute, HMAC, matches stored copy"),
                                      ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
@@ -117,11 +128,18 @@ class H(BaseHTTPRequestHandler):
                              "recentVotes": [{k: v for k, v in x.items() if k != "_t"} for x in VOTES[-20:]]})
         elif self.path == "/v1/receipts" or self.path.startswith("/v1/receipts?"):
             from urllib.parse import urlparse, parse_qs
-            q = parse_qs(urlparse(self.path).query)
+            q = parse_qs(urlparse(self.path).query, keep_blank_values=True)
             try: limit, offset = int(q.get("limit", ["20"])[0]), int(q.get("offset", ["0"])[0])
             except ValueError: return self._send(400, {"error": "limit/offset must be integers"})
             if not (1 <= limit <= 100 and offset >= 0): return self._send(400, {"error": "limit 1..100, offset >= 0"})
-            self._send(200, list_receipts(limit, offset))
+            status = q.get("status", [None])[0]
+            if status is not None and not (1 <= len(status) <= 32 and status.replace("_", "").isalnum()):
+                return self._send(400, {"error": "status must be 1..32 chars [A-Za-z0-9_]"})
+            since = q.get("since", [None])[0]
+            if since is not None:
+                if not since.isdigit(): return self._send(400, {"error": "since must be a non-negative integer (epoch seconds)"})
+                since = int(since)
+            self._send(200, list_receipts(limit, offset, status, since))
         elif self.path.startswith("/v1/receipts/"):
             rid = os.path.basename(self.path); f = os.path.join(RECEIPTS, rid + ".json")
             if rid.isalnum() and os.path.exists(f): self._send(200, json.load(open(f)))
