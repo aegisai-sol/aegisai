@@ -201,3 +201,69 @@ def verify_card_chain(card, trusted_pubkeys, rotations=None, revocations=None):
         return {**v, "rotated": nb is not None}
     except Exception as e:
         return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
+
+BUNDLE_SCHEME = "pov-r/trust-bundle/1"
+MAX_BUNDLE_STATEMENTS = 256
+
+def _canon(x): return json.dumps(x, sort_keys=True, separators=(",", ":"))
+
+def bundle_message(signer, seq, issued_at, expires_at, rotations, revocations):
+    core = {"signer": signer, "seq": seq, "issued_at": issued_at, "expires_at": expires_at,
+            "rotations": sorted(_canon(r) for r in rotations), "revocations": sorted(_canon(r) for r in revocations)}
+    return BUNDLE_SCHEME.encode() + b"\n" + _canon(core).encode()
+
+def _int(x): return not isinstance(x, bool) and isinstance(x, int) and x >= 0
+
+def make_bundle(seed_hex, seq, issued_at, expires_at, rotations=(), revocations=()):
+    """Signed, sequenced snapshot of every key-rotation and revocation statement the coordinator knows. Individual
+    statements are self-authenticating, but a verifier can't tell whether one is being WITHHELD (e.g. a
+    'compromised' revocation). A bundle closes that gap: a monotonic seq lets a verifier refuse rollback to an older
+    snapshot, and expires_at bounds how stale a replayed one can be. Statement order does not matter. Raises ValueError."""
+    ed, _ = _ed()
+    if ed is None: raise ValueError("ed25519 unavailable (install cryptography)")
+    if not _hexn(seed_hex, 64): raise ValueError("bad seed")
+    if not _int(seq): raise ValueError("seq must be a non-negative int")
+    if not _num(issued_at) or not _num(expires_at) or expires_at <= issued_at: raise ValueError("need 0 <= issued_at < expires_at")
+    rots, revs = list(rotations), list(revocations)
+    if len(rots) + len(revs) > MAX_BUNDLE_STATEMENTS: raise ValueError("too many statements")
+    if any(check_rotation(r) is None for r in rots) or any(check_revocation(r) is None for r in revs):
+        raise ValueError("bundle may only carry valid statements")
+    pk = pubkey_from_seed(seed_hex)
+    sig = ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex)).sign(
+        bundle_message(pk, seq, issued_at, expires_at, rots, revs)).hex()
+    return {"scheme": BUNDLE_SCHEME, "signer": pk, "seq": seq, "issued_at": issued_at, "expires_at": expires_at,
+            "rotations": rots, "revocations": revs, "sig": sig}
+
+def check_bundle(bundle, trusted_pubkeys, now=None, min_seq=None):
+    """Verify a pov-r/trust-bundle/1 against pinned root keys. The signer must be a key reachable from the pins via
+    the bundle's own rotations, valid at issued_at, and not revoked (compromised at all, or retired at/before
+    issued_at). now: reject if expired or issued in the future; min_seq: last seq this verifier accepted (rollback
+    -> reject; equal seq is a re-fetch and OK). Returns {ok, reason, seq, signer, rotations, revocations}; never raises."""
+    try:
+        if not isinstance(bundle, dict) or bundle.get("scheme") != BUNDLE_SCHEME: return {"ok": False, "reason": "not a trust bundle"}
+        pk, seq, ia, ea, sig = (bundle.get(k) for k in ("signer", "seq", "issued_at", "expires_at", "sig"))
+        rots, revs = bundle.get("rotations"), bundle.get("revocations")
+        if not _hexn(pk, 64) or not _hexn(sig, 128) or not _int(seq) or not _num(ia) or not _num(ea) or ea <= ia:
+            return {"ok": False, "reason": "bad bundle fields"}
+        if not isinstance(rots, list) or not isinstance(revs, list) or len(rots) + len(revs) > MAX_BUNDLE_STATEMENTS:
+            return {"ok": False, "reason": "bad bundle statements"}
+        ed, _ = _ed()
+        if ed is None: return {"ok": False, "reason": "ed25519 unavailable"}
+        try: ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(sig), bundle_message(pk, seq, ia, ea, rots, revs))
+        except Exception: return {"ok": False, "reason": "bad signature"}
+        win = resolve_trust(trusted_pubkeys, rots, revs)
+        if not win: return {"ok": False, "reason": "no valid trusted pubkey"}
+        if pk not in win: return {"ok": False, "reason": "signer not trusted"}
+        nb, na = win[pk]
+        if (nb is not None and ia < nb) or (na is not None and ia >= na): return {"ok": False, "reason": "signer not valid at issued_at"}
+        for c in (check_revocation(r) for r in revs):
+            if c and c[0] == pk and (c[1] == "compromised" or ia >= c[2]): return {"ok": False, "reason": "bundle signer revoked"}
+        if now is not None:
+            if not _num(now): return {"ok": False, "reason": "bad now"}
+            if now >= ea: return {"ok": False, "reason": "bundle expired"}
+            if ia > now: return {"ok": False, "reason": "bundle issued in the future"}
+        if min_seq is not None and (not _int(min_seq) or seq < min_seq): return {"ok": False, "reason": "bundle rollback (seq < last seen)"}
+        return {"ok": True, "reason": None, "seq": seq, "signer": pk,
+                "rotations": [r for r in rots if check_rotation(r)], "revocations": [r for r in revs if check_revocation(r)]}
+    except Exception as e:
+        return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
