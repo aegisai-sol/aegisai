@@ -1,0 +1,4 @@
+node_id: agis-node-local-001
+mock_mode: true
+dry_run_submit: true
+votes_path: ./data/votes.jsonl

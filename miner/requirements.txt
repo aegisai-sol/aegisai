@@ -1,0 +1,1 @@
+solders>=0.21   # only needed for AEGIS_SOLANA_SUBMIT=1; simulation is stdlib-only
