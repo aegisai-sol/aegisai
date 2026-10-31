@@ -57,6 +57,19 @@ No private keys or seeds in any repo (`.keys/`, `.env` gitignored). Never share 
 - `AEGIS_RECEIPT_HMAC=<secret>`: coordinator adds `mac` (HMAC-SHA256 over the receipt digest); `/v1/gate` and `/v1/gate/batch` return **DENY** for receipts with a missing or bad MAC. Unset = no MAC required. The secret is never logged or returned.
 - Claims are normalized with versioned `claim_norm` v2 (NFKC, smart quotes/dashes → ASCII, zero-width stripped). The gate matches v1 and v2 digests for back-compat.
 
+## Pay-to-verify AGIS burn (pov-r/fee-burn/1, BME+)
+
+BME+ = Burn-and-Mint Equilibrium plus staking. The first demand sink: when a customer pays for a verification in AGIS,
+that AGIS is **burned** (destroyed), not recycled into the miner pool. `miner/aegis_miner/fee_burn.py` emits a signed
+Ed25519 burn voucher bound to the verify receipt id, payer and exact whole-AGIS amount (must equal the quoted fee).
+Each receipt can be burned once; zero/negative amounts, empty ids, bad keys and double burns fail closed with nothing
+consumed. Library only: no HTTP route, no mint, no on-chain tx; the in-memory `BurnLedger` forgets burned ids on
+restart (persist/anchor before production).
+
+Note: the 5% "burn" bucket in `reservoir.SPLIT_BPS` is fee-split accounting and is separate from this BME pay-to-verify
+burn. Miner pay stays job-scoped from the Reservoir (`pov-r/credit-settle/1`). Still to ship under BME+: stake-to-mine,
+stake-to-API, oracle/anchor burn, governance.
+
 ## Proof Credits → AGIS (pov-r/credit-settle/1, job-scoped)
 In plain words: **AGIS is only paid out of a real customer's payment for one specific verification.** When a job is
 paid, its fee splits 70% miners / 20% Reservoir / 5% treasury / 5% burn; the 70% is shared only among the miners who
