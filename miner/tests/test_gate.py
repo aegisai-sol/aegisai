@@ -48,3 +48,20 @@ def test_http(tmp_path, monkeypatch):
     assert post({"action": "publish", "claim": "grass is red"})["decision"] == "REQUIRE_RECEIPT"
     assert post({"action": "mint", "claim": "x"}) == 400
     s.shutdown()
+
+def test_ttl(tmp_path, monkeypatch):
+    s = str(tmp_path); _rec(s, "old", [{"text": "Old fact", "vote": "TRUE"}])
+    r = json.load(open(os.path.join(s, "old.json"))); r["ts"] = 1000; r["digest"] = token_bridge.receipt_digest(r)
+    json.dump(r, open(os.path.join(s, "old.json"), "w"))
+    assert gate.decide("publish", s, "old fact", now=2000)["decision"] == "ALLOW"
+    monkeypatch.setenv("AEGIS_RECEIPT_TTL", "500")
+    x = gate.decide("publish", s, "old fact", now=2000); assert x["decision"] == "REQUIRE_RECEIPT" and x["matches"][0]["expired"]
+    assert gate.decide("publish", s, "old fact", now=1400)["decision"] == "ALLOW"
+
+def test_batch(tmp_path):
+    s = str(tmp_path); _rec(s, "b", [{"text": "P", "vote": "TRUE"}, {"text": "Q", "vote": "FALSE"}])
+    assert gate.decide_batch("publish", s, ["P"])["decision"] == "ALLOW"
+    assert gate.decide_batch("publish", s, ["P", "unknown"])["decision"] == "REQUIRE_RECEIPT"
+    r = gate.decide_batch("publish", s, ["P", "unknown", "digest:" + gate.claim_digest("Q")]); assert r["decision"] == "DENY" and r["count"] == 3
+    with pytest.raises(ValueError): gate.decide_batch("publish", s, [])
+    with pytest.raises(ValueError): gate.decide_batch("publish", s, ["x"] * 51)

@@ -42,12 +42,13 @@ def list_receipts(limit=20, offset=0):
     return {"total": len(ids), "limit": limit, "offset": offset, "next_offset": nxt, "items": items}
 from aegis_miner.ratelimit import RateLimiter
 LIMITER = RateLimiter.from_env()
-RATE_LIMITED = ("/v1/verify", "/v1/fee-preview")
+RATE_LIMITED = ("/v1/verify", "/v1/fee-preview", "/v1/gate/batch")
 OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version": "0.1.0",
            "description": "Proof-of-Source verification coordinator (devnet/testing; no mainnet token)."},
            "paths": {p: {m: {"summary": d, "responses": {"200": {"description": "OK"}, **({"429": {"description": "Rate limited (Retry-After header)"}} if p in RATE_LIMITED else {})}}}
                      for p, m, d in (("/v1/verify", "post", "Verify a claim against an HTTPS source; returns signed receipt"),
                                      ("/v1/fee-preview", "post", "Preview 70/20/5/5 fee split"),
+                                     ("/v1/gate/batch", "post", "Batch gate: {action, claims[<=50]} -> overall + per-claim decisions"),
                                      ("/v1/gate", "post", "Verify-then-Act: ALLOW/DENY/REQUIRE_RECEIPT for {action, claim|claim_digest}"),
                                      ("/v1/fetch-check", "post", "Fetch-only source check"),
                                      ("/v1/consensus", "post", "Multi-node quorum verify"),
@@ -117,6 +118,12 @@ class H(BaseHTTPRequestHandler):
             if not ok: METRICS["rate_limit_hits"] += 1; return self._send(429, {"error": "rate limited", "retry_after": retry}, (("Retry-After", str(retry)),))
         if self.path == "/v1/verify": METRICS["verify_count"] += 1; return self._verify()
         if self.path == "/v1/fee-preview": METRICS["fee_preview_count"] += 1; return self._fee_preview()
+        if self.path == "/v1/gate/batch":
+            from . import gate
+            try:
+                b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                return self._send(200, gate.decide_batch(b.get("action"), RECEIPTS, b.get("claims")))
+            except Exception as e: return self._send(400, {"error": str(e)[:200]})
         if self.path == "/v1/gate":
             from . import gate
             try:
