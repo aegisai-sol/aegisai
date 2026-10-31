@@ -12,7 +12,7 @@ embedded root is used and the result is marked untrusted (trusted=False). Exit 0
 (or --allow-untrusted). Never raises on malformed input.
 """
 import argparse, json, sys
-from . import claim_merkle as cm
+from . import claim_merkle as cm, card_attest as ca
 
 def _kind(obj):
     if isinstance(obj, list): return "set"
@@ -39,12 +39,20 @@ def _card_pins(card):
         return None, None, None, "proof card self-audit not intact"
     return root, n, rid, None
 
-def verify_offline(obj, card=None, root=None, leaf_count=None):
+def verify_offline(obj, card=None, root=None, leaf_count=None, pubkeys=None):
     """Verify any disclosure kind against trusted pins (card and/or explicit root/leaf_count).
-    Returns {ok, trusted, kind, reason, ...}; never raises."""
+    pubkeys: trusted coordinator card keys (hex). When given, the card MUST carry a valid Ed25519 attestation
+    from one of them (pov-r/card-attest/1), so a forged card cannot vouch for a forged disclosure.
+    Returns {ok, trusted, kind, reason, card_signed, ...}; never raises."""
     try:
         kind = _kind(obj)
         if kind is None: return {"ok": False, "trusted": False, "kind": None, "reason": "unrecognised input"}
+        signer = None
+        if pubkeys:
+            if card is None: return {"ok": False, "trusted": False, "kind": kind, "reason": "--pubkey needs a proof card"}
+            sv = ca.verify_card(card, pubkeys)
+            if not sv["ok"]: return {"ok": False, "trusted": False, "kind": kind, "reason": f"card attestation: {sv['reason']}", "card_signed": False}
+            signer = sv["signer"]
         croot, cn, crid, err = _card_pins(card)
         if err: return {"ok": False, "trusted": False, "kind": kind, "reason": err}
         for a, b, what in ((root, croot, "root"), (leaf_count, cn, "leaf_count")):
@@ -66,7 +74,9 @@ def verify_offline(obj, card=None, root=None, leaf_count=None):
         trusted = R is not None and N is not None
         out = {"ok": bool(r.get("ok")), "trusted": trusted, "kind": kind, "reason": r.get("reason"), "root": r.get("root"),
                "root_source": "pinned" if R is not None else "embedded(untrusted)",
-               "leaf_count_source": "pinned" if N is not None else "embedded(untrusted)"}
+               "leaf_count_source": "pinned" if N is not None else "embedded(untrusted)",
+               "card_signed": True if signer else ("unchecked" if isinstance(card, dict) and card.get("attestation") else False),
+               "signer": signer}
         if kind == "single" and isinstance(body, dict): out.update(count=1, indices=[body.get("index")], claims=[cm.public_claim(body.get("claim") or {})])
         elif kind == "set": out.update(count=r.get("count"), indices=r.get("indices"), claims=[cm.public_claim(d.get("claim") or {}) for d in items if isinstance(d, dict)])
         else: out.update(count=r.get("count"), indices=body.get("indices"), claims=[cm.public_claim(c) for c in body.get("claims") or [] if isinstance(c, dict)])
@@ -83,13 +93,14 @@ def main(argv=None):
     p.add_argument("disclosure", help="disclosure / set / multiproof JSON file, or - for stdin")
     p.add_argument("--card", help="proof card JSON (GET /v1/receipts/{id}/proof) - pins root, claim_count, receipt_id")
     p.add_argument("--root"); p.add_argument("--leaf-count", type=int)
+    p.add_argument("--pubkey", action="append", help="trusted coordinator card key (hex, GET /v1/card-key); repeatable; card must be signed by one")
     p.add_argument("--allow-untrusted", action="store_true", help="exit 0 on ok even without pinned root/leaf_count")
     a = p.parse_args(argv)
     try:
         obj = _load(a.disclosure); card = _load(a.card) if a.card else None
     except (OSError, ValueError) as e:
         print(json.dumps({"ok": False, "trusted": False, "reason": f"cannot read input: {e}"})); return 2
-    r = verify_offline(obj, card, a.root, a.leaf_count)
+    r = verify_offline(obj, card, a.root, a.leaf_count, a.pubkey)
     print(json.dumps(r, indent=2, sort_keys=True))
     return 0 if r["ok"] and (r["trusted"] or a.allow_untrusted) else 1
 

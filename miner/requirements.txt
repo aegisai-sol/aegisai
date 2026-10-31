@@ -1,1 +1,2 @@
 solders>=0.21   # only needed for AEGIS_SOLANA_SUBMIT=1; simulation is stdlib-only
+cryptography>=41  # optional: Ed25519 proof-card attestation (AEGIS_CARD_SIGNING_KEY / offline_verify --pubkey)

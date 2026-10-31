@@ -86,9 +86,20 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
                                      ("/v1/receipts/{id}/claims", "get", "Compact multiproof: ?indices=0,3,5 -> k claims + salts + shared sibling hashes (scheme pov-r/claim-multiproof/1)"),
                                      ("/v1/claims/verify-disclosure", "post", "Check a claim disclosure, {disclosures:[...]} set (max 32), or {multiproof} (stored root + leaf_count bind k-of-N) against claims_root"),
                                      ("/v1/receipts/verify", "post", "Audit a presented receipt: digest recompute, HMAC, matches stored copy"),
+                                     ("/v1/card-key", "get", "Ed25519 public key that signs proof cards (pov-r/card-attest/1); 404 if AEGIS_CARD_SIGNING_KEY unset"),
                                      ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
                                      ("/v1/metrics", "get", "Counters: verify_count, fee_preview_count, rate_limit_hits, body_rejected"),
                                      ("/v1/openapi.json", "get", "This document"))}}
+from . import card_attest as _ca
+def card_pubkey(env=None):
+    """Public card key from AEGIS_CARD_SIGNING_KEY (64-hex Ed25519 seed; never logged/returned) or None."""
+    return _ca.pubkey_from_seed((env if env is not None else os.environ).get("AEGIS_CARD_SIGNING_KEY", "").strip().lower())
+def attest_card(card, env=None):
+    """Attach an Ed25519 attestation when a valid card key is configured; otherwise serve the card unsigned."""
+    seed = (env if env is not None else os.environ).get("AEGIS_CARD_SIGNING_KEY", "").strip().lower()
+    if not seed: return card
+    try: return _ca.sign_card(card, seed)
+    except ValueError: return {**card, "attestation": None, "attestation_error": "card key misconfigured"}
 METRICS = {"verify_count": 0, "fee_preview_count": 0, "rate_limit_hits": 0, "body_rejected": 0}
 DEFAULT_MAX_BODY, MAX_BODY_CAP = 262144, 4194304
 def max_body(env=None):
@@ -174,8 +185,9 @@ class H(BaseHTTPRequestHandler):
             if not (rid.isalnum() and os.path.exists(f)): return self._send(404, {"error": "receipt not found"})
             try: rec = json.load(open(f))
             except Exception: return self._send(500, {"error": "stored receipt unreadable"})
-            try: self._send(200, token_bridge.receipt_proof(rec))
-            except ValueError as e: self._send(500, {"error": str(e)[:200]})
+            try: card = token_bridge.receipt_proof(rec)
+            except ValueError as e: return self._send(500, {"error": str(e)[:200]})
+            self._send(200, attest_card(card))
         elif self.path.startswith("/v1/receipts/"):
             rid = os.path.basename(self.path); f = os.path.join(RECEIPTS, rid + ".json")
             if rid.isalnum() and os.path.exists(f): self._send(200, json.load(open(f)))
@@ -187,6 +199,8 @@ class H(BaseHTTPRequestHandler):
             cid = self.path.split("/v1/claim-quote/", 1)[1]
             tot = sum(e["credits"] for e in map(json.loads, open(CREDITS))) if os.path.exists(CREDITS) else 0
             self._send(200, token_bridge.claim_quote(CREDITS, cid, tot, token_bridge.state_from_env()))
+        elif self.path == "/v1/card-key":
+            pk = card_pubkey(); self._send(200 if pk else 404, {"scheme": _ca.SCHEME, "pubkey": pk} if pk else {"error": "card signing not configured"})
         elif self.path == "/v1/token-state":
             st = token_bridge.state_from_env(); self._send(200, {"mode": st.mode, "mint": st.mint()})
         elif self.path == "/v1/health": self._send(200, health())
