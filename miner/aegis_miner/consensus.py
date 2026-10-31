@@ -28,7 +28,7 @@ def consensus(url, claim_text, nodes, quorum=2):
     if len(nodes) < quorum: raise ValueError(f"need >= {quorum} nodes")
     def safe(n):
         try: return n(url, claim_text)
-        except Exception as e: return {"node": getattr(n, "node_id", "?"), "vote": "UNSURE", "error": str(e)[:100]}
+        except Exception as e: return {"node": getattr(n, "node_id", "?"), "vote": "UNSURE", "error": (str(e) or type(e).__name__)[:100]}
     with ThreadPoolExecutor(max_workers=len(nodes)) as ex: results = list(ex.map(safe, nodes))
     hashes = Counter(r["source_hash"] for r in results if r.get("source_hash"))
     votes = Counter(r.get("vote") for r in results if r.get("vote") and not r.get("error"))
@@ -124,3 +124,35 @@ def _env_int(name, default):
     except ValueError: return default
 
 PEER_HEALTH = PeerHealth(_env_int("AEGIS_PEER_FAILS", 3), _env_int("AEGIS_PEER_RECOVERS", 2))
+
+
+# --- quorum collection skips dead peers (hysteresis) ---
+def build_nodes(peer_endpoints, health=None, quorum=2, node_factory=None):
+    """Returns (nodes, info). No peers configured -> local 2-fetch demo.
+    Peers configured -> self + ALIVE peers only (ids keep original index; URLs never in info)."""
+    health = health or PEER_HEALTH; node_factory = node_factory or http_node
+    peers = [p.strip() for p in peer_endpoints if p and p.strip()]
+    if not peers:
+        return [local_node("self"), local_node("self-b")], {"mode": "local_demo", "known": 0, "alive": 0, "skipped": []}
+    alive = set(health.alive_endpoints(peers))
+    nodes = [local_node("self")] + [node_factory(f"peer{i}", e) for i, e in enumerate(peers) if e in alive]
+    skipped = [f"peer{i}" for i, e in enumerate(peers) if e not in alive]
+    return nodes, {"mode": "peers", "known": len(peers), "alive": len(alive), "skipped": skipped}
+
+def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node_factory=None):
+    """Consensus over alive peers; too few alive -> NO_CONSENSUS with reason (no exception).
+    Passive health: a peer that errors during collection counts as a failed observation."""
+    health = health or PEER_HEALTH
+    nodes, info = build_nodes(peer_endpoints, health, quorum, node_factory)
+    if len(nodes) < quorum:
+        return {"url": url, "claim": claim_text, "quorum": quorum, "nodes": len(nodes), "status": "NO_CONSENSUS",
+                "valid": False, "reason": "insufficient_alive_peers", "consensus_hash": None, "consensus_vote": None,
+                "per_node": [], "peer_selection": info}
+    rec = consensus(url, claim_text, nodes, quorum=quorum)
+    peers = [p.strip() for p in peer_endpoints if p and p.strip()]
+    for r in rec["per_node"]:
+        nid = r.get("node") or ""
+        if nid.startswith("peer") and nid[4:].isdigit() and int(nid[4:]) < len(peers):
+            health.observe(peers[int(nid[4:])], not r.get("error"))
+    rec["peer_selection"] = info
+    return rec

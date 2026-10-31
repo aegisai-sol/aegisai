@@ -140,10 +140,7 @@ class H(BaseHTTPRequestHandler):
             except Exception: return self._send(400, {"error": "need {url, claim}"})
             try:
                 if self.path == "/v1/fetch-check": return self._send(200, _v.check_url_only(url, claim_text=claim))
-                peers = [_c.http_node(f"peer{i}", e) for i, e in enumerate(filter(None, os.environ.get("AEGIS_PEERS", "").split(",")))]
-                nodes = [_c.local_node("self")] + peers
-                if len(nodes) < 2: nodes.append(_c.local_node("self-b"))  # demo mode: 2 local independent fetches
-                return self._send(200, _c.consensus(url, claim, nodes, quorum=2))
+                return self._send(200, _c.consensus_alive(url, claim, os.environ.get("AEGIS_PEERS", "").split(","), quorum=2))
             except Exception as e: return self._send(400, {"error": str(e)[:200]})
         if self.path != "/api/vote": return self._send(404, {"error": "not found"})
         try: v = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
