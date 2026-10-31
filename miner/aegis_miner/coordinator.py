@@ -60,6 +60,11 @@ class H(BaseHTTPRequestHandler):
                "credits_awarded": n, "calibration": {"ok": ok, "failed": bad},
                "flagged": not ok, "reservoir_note": RESERVOIR_NOTE, "onchain": "PENDING (devnet memo later)"}
         rec["digest"] = token_bridge.receipt_digest(rec)
+        if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" and os.environ.get("MAINNET") != "1":  # default OFF; devnet only
+            try:
+                from aegis_miner.solana_submit import SolanaSubmitter
+                rec["onchain"] = {"cluster": "devnet", "memo_tx": SolanaSubmitter().submit(f"AGIS|PoV-R|{rid}|{rec['digest']}")}
+            except Exception as e: rec["onchain"] = f"ANCHOR_FAILED: {type(e).__name__}"
         os.makedirs(RECEIPTS, exist_ok=True); json.dump(rec, open(os.path.join(RECEIPTS, rid + ".json"), "w"))
         self._send(200, rec)
     def log_message(self, *a): pass

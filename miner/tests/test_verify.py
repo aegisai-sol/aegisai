@@ -88,3 +88,14 @@ def test_token_bridge(tmp_path):
     assert abs(q["claimable_agis"] - min(.7 * 100 / .01, .005 * tb.RESERVOIR_SUPPLY) / 2) < 1e-6
     assert tb.claim_intent(q, "W")["signed"] is False
     assert tb.receipt_digest({"receipt_id": "x", "claims": []}) == tb.receipt_digest({"claims": [], "receipt_id": "x", "ts": 1})
+
+def test_meaning_negation_paraphrase():
+    body = "The Ethereum network is not a proof-of-work chain since 2022. Acme Corp bought Widget Inc for 5 million. Fees decreased sharply in March."
+    s = verify.support_check
+    assert s("Ethereum network is a proof-of-work chain", body)["verdict"] == "CONTRADICTED"
+    assert s("Ethereum network is not a proof-of-work chain", body)["verdict"] == "SUPPORTED"
+    r = s("Acme Corp acquired Widget Inc for 5 million", body)
+    assert r["verdict"] == "SUPPORTED" and "bought" in r["evidence"]
+    assert s("Fees increased sharply in March", body)["verdict"] == "CONTRADICTED"
+    assert s("Fees dropped sharply in March", body)["verdict"] == "SUPPORTED"
+    assert s("Acme Corp did not buy Widget Inc", body)["verdict"] == "CONTRADICTED"

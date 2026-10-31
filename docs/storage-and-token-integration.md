@@ -27,3 +27,8 @@ Status: Option A — **no AGIS mint**. Everything below runs today in off-chain 
 - LP price oracle → `agis_price_usd()`.
 - Credit burn entry on claim (negative ledger line) + claim program / multisig transfer from Reservoir.
 - Multi-node fetch consensus for Proof-of-Source receipts.
+
+## Devnet receipt anchoring (toggle, default OFF)
+The coordinator can anchor each `/v1/verify` receipt digest as an SPL Memo on **devnet**:
+`AEGIS_ANCHOR_RECEIPTS=1 SOLANA_KEYPAIR=/path/devnet.json python3 -m aegis_miner.coordinator` (needs `pip install solders` + devnet SOL).
+Memo: `AGIS|PoV-R|<receipt_id>|<digest>`; tx sig stored in `rec.onchain.memo_tx`. Ignored when `MAINNET=1`. Never put keys in chat/repo.

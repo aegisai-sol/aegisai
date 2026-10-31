@@ -102,23 +102,67 @@ def _passages(body, size=3):
     for k in range(len(sents)):
         yield " ".join(sents[k:k + size])
 
+NEG_RE = re.compile(r"\b(not|no|never|none|neither|nor|cannot|can't|won't|isn't|aren't|wasn't|weren't|doesn't|don't|didn't|hasn't|haven't|hadn't|without|false|denied|denies|fails?|failed|lacks?|не|няма|никога)\b", re.I)
+SYN = [  # tiny paraphrase lexicon: each group collapses to one concept id
+    "launch launched launches launching release released releases debut debuted start started began begin introduced introduce went live",
+    "buy buys bought purchase purchased acquire acquired acquisition",
+    "increase increased increases rise rose risen grow grew grown growth raise raised up higher",
+    "decrease decreased decreases fall fell fallen drop dropped decline declined reduce reduces reduced lower cut cuts",
+    "big large huge major",  "small little minor tiny",
+    "secure secures securing protect protects protected safeguard",
+    "use uses used utilize utilizes employ employs", "fast quick rapid speedy", "allow allows allowed permit permits enable enables",
+    "create created creates build built make made founded found established",
+    "ceo chief executive", "company firm corporation business", "price cost costs priced",
+]
+ANT = [("increase", "decrease"), ("big", "small"), ("true", "false"), ("win", "lose"), ("open", "closed"), ("before", "after")]
+_C = {}
+for g in SYN:
+    ws = g.split(); [_C.setdefault(w, ws[0]) for w in ws]
+for a, b in [("won", "win"), ("wins", "win"), ("lost", "lose"), ("loses", "lose"), ("closes", "closed"), ("opens", "open")]: _C[a] = b
+
+def _stem(w):
+    if w in _C: return _C[w]
+    for suf in ("ings", "ing", "edly", "ed", "es", "s", "ly"):
+        if len(w) > len(suf) + 3 and w.endswith(suf): w = w[:-len(suf)]; break
+    return _C.get(w, w)
+
+def _concepts(t): return {_stem(w) for w in _terms(t)}
+def _neg(t): return len(NEG_RE.findall(t)) % 2 == 1  # double negation cancels
+
+def meaning_score(claim_text, passage):
+    """Lightweight local entailment heuristic (no paid APIs, no model downloads).
+    coverage = share of claim concepts (stemmed + synonym-collapsed) in the passage;
+    polarity: claim vs passage negation parity; antonym flip (claim 'increase' vs page 'decrease')."""
+    c, p = _concepts(claim_text), _concepts(passage)
+    if not c: return 0.0, False
+    cov = len(c & p) / len(c)
+    flip = _neg(claim_text) != _neg(passage)
+    for a, b in ANT:
+        if (a in c and b in p and a not in p) or (b in c and a in p and b not in p): flip = not flip
+    return cov, flip
+
 def support_check(claim_text, body):
-    """Find the passage in `body` that best supports `claim_text`.
-    Score = share of claim content-terms present in the passage; numbers in the claim must appear
-    in that passage (a number mismatch on an otherwise matching passage = contradiction)."""
+    """Find the passage in `body` that best supports `claim_text` by meaning, not raw words.
+    SUPPORTED: concept coverage >=0.7, same polarity, all claim numbers present.
+    CONTRADICTED: matching passage but opposite polarity (negation/antonym) or number mismatch."""
     terms, nums = _terms(claim_text), _nums(claim_text)
     if not terms: return {"support": 0.0, "verdict": "NO_CONTENT", "evidence": ""}
-    best, best_p = -1.0, ""
-    for p in _passages(body):
-        sc = len(terms & _terms(p)) / len(terms)
-        if sc > best: best, best_p = sc, p
+    best, best_p, best_flip = -1.0, "", False
+    for size in (1, 3):
+        for p in _passages(body, size):
+            sc, flip = meaning_score(claim_text, p)
+            sc -= 0.01 * size  # prefer the tightest passage on ties
+            if sc > best: best, best_p, best_flip = sc, p, flip
+    best = max(best, 0.0) + (0.03 if best > 0 else 0)
+    best = min(best, 1.0)
     missing = sorted(nums - _nums(best_p)) if nums else []
-    if best >= 0.7 and not missing: v = "SUPPORTED"
-    elif best >= 0.7 and missing: v = "CONTRADICTED"
+    if best >= 0.7 and (missing or best_flip): v = "CONTRADICTED"
+    elif best >= 0.7: v = "SUPPORTED"
     elif best >= 0.4: v = "PARTIAL"
     else: v = "NOT_FOUND"
-    r = {"support": round(max(best, 0.0), 2), "verdict": v, "evidence": best_p[:300]}
+    r = {"support": round(best, 2), "verdict": v, "evidence": best_p[:300], "scorer": "meaning-v1"}
     if missing: r["numbers_missing"] = missing
+    if best_flip and best >= 0.7: r["polarity"] = "opposite"
     return r
 
 def _fingerprint(url, title, body):
