@@ -5,6 +5,7 @@ operator's Phantom / vault-held keypair outside this process; we only emit unsig
 import os
 import hashlib, json, os, time
 from aegis_miner import credits
+from aegis_miner import claim_merkle as _cm
 
 RESERVOIR_SUPPLY = 400_000_000          # 40% of 1B AGIS (whitepaper); not minted (Option A)
 FEE_SHARE_CAP, RESERVOIR_PERIOD_CAP = 0.70, 0.005
@@ -76,7 +77,7 @@ def receipt_proof(rec, secret=None, store_dir=None):
             "ts": rec.get("ts"), "claim_count": len(claims), "votes": dict(sorted(tally.items())),
             "calibration_ok": cal.get("ok"), "flagged": bool(rec.get("flagged")), "mac_present": "mac" in rec,
             "onchain": rec.get("onchain") if isinstance(rec.get("onchain"), dict) else None,
-            "audit": {k: a[k] for k in ("intact", "digest_ok", "mac")}}
+            "audit": {k: a[k] for k in ("intact", "digest_ok", "mac")}, "claims_root": _cm.claims_root(rec)}
 
 AUDIT_BATCH_MAX = 50
 

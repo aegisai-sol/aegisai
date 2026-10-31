@@ -68,7 +68,7 @@ def list_receipts(limit=20, offset=0, status=None, since=None):
     return out
 from aegis_miner.ratelimit import RateLimiter
 LIMITER = RateLimiter.from_env()
-RATE_LIMITED = ("/v1/verify", "/v1/fee-preview", "/v1/gate/batch", "/v1/receipts/verify")
+RATE_LIMITED = ("/v1/verify", "/v1/fee-preview", "/v1/gate/batch", "/v1/receipts/verify", "/v1/claims/verify-disclosure")
 OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version": "0.1.0",
            "description": "Proof-of-Source verification coordinator (devnet/testing; no mainnet token)."},
            "paths": {p: {m: {"summary": d, "responses": {"200": {"description": "OK"}, **({"429": {"description": "Rate limited (Retry-After header)"}} if p in RATE_LIMITED else {}), **({"413": {"description": "Body exceeds AEGIS_MAX_BODY"}} if m == "post" else {})}}}
@@ -82,6 +82,8 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
                                      ("/v1/receipts", "get", "Paginated receipt summaries (limit, offset, status, since filters)"),
                                      ("/v1/receipts/{id}", "get", "Single receipt"),
                                      ("/v1/receipts/{id}/proof", "get", "Shareable proof card: digest, nonce, vote tally, self-audit; no claim texts/client_id/MAC"),
+                                     ("/v1/receipts/{id}/claims/{index}", "get", "Selective disclosure: one claim + salt + Merkle path to claims_root (others stay hidden)"),
+                                     ("/v1/claims/verify-disclosure", "post", "Check a claim disclosure against claims_root (expected_root from proof card)"),
                                      ("/v1/receipts/verify", "post", "Audit a presented receipt: digest recompute, HMAC, matches stored copy"),
                                      ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
                                      ("/v1/metrics", "get", "Counters: verify_count, fee_preview_count, rate_limit_hits, body_rejected"),
@@ -141,6 +143,16 @@ class H(BaseHTTPRequestHandler):
                 if not since.isdigit(): return self._send(400, {"error": "since must be a non-negative integer (epoch seconds)"})
                 since = int(since)
             self._send(200, list_receipts(limit, offset, status, since))
+        elif self.path.startswith("/v1/receipts/") and "/claims/" in self.path:
+            from . import claim_merkle as _cm
+            rid, _, idx = self.path[len("/v1/receipts/"):].partition("/claims/"); f = os.path.join(RECEIPTS, rid + ".json")
+            if not (rid.isalnum() and os.path.exists(f)): return self._send(404, {"error": "receipt not found"})
+            if not idx.isdigit(): return self._send(400, {"error": "claim index must be a non-negative integer"})
+            try: rec = json.load(open(f))
+            except Exception: return self._send(500, {"error": "stored receipt unreadable"})
+            if not isinstance(rec, dict): return self._send(500, {"error": "stored receipt unreadable"})
+            try: self._send(200, _cm.disclose(rec, int(idx)))
+            except IndexError as e: self._send(404, {"error": str(e)})
         elif self.path.startswith("/v1/receipts/") and self.path.endswith("/proof"):
             rid = self.path[len("/v1/receipts/"):-len("/proof")]; f = os.path.join(RECEIPTS, rid + ".json")
             if not (rid.isalnum() and os.path.exists(f)): return self._send(404, {"error": "receipt not found"})
@@ -193,6 +205,21 @@ class H(BaseHTTPRequestHandler):
                 if isinstance(b, dict) and "receipts" in b: return self._send(200, token_bridge.audit_batch(b["receipts"], store_dir=RECEIPTS))
                 return self._send(200, token_bridge.audit_receipt(b.get("receipt", b), store_dir=RECEIPTS))
             except Exception as e: return self._send(400, {"error": str(e)[:200]})
+        if self.path == "/v1/claims/verify-disclosure":
+            from . import claim_merkle as _cm
+            try: b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            except Exception: return self._send(400, {"error": "bad json"})
+            if not isinstance(b, dict): return self._send(400, {"error": "object required"})
+            d, exp, src = b.get("disclosure", b), b.get("expected_root"), None
+            rid = d.get("receipt_id") if isinstance(d, dict) else None
+            if exp is None and isinstance(rid, str) and rid.isalnum() and os.path.exists(os.path.join(RECEIPTS, rid + ".json")):
+                try:
+                    stored = json.load(open(os.path.join(RECEIPTS, rid + ".json")))
+                    if isinstance(stored, dict): exp, src = _cm.claims_root(stored), "stored"
+                except Exception: pass
+            r = _cm.verify_disclosure(d, exp)
+            if src: r["root_source"] = src
+            return self._send(200, r)
         if self.path == "/v1/gate":
             from . import gate
             try:
