@@ -1,14 +1,14 @@
 // Live AGIS stats from Solana mainnet RPC (getTokenSupply). Burn = total ever minted − current supply (needs mint log; 0 until burns are recorded).
 export const MINT='GhSiU95vtKwn7FBAW1u5krxYP2PnpFPotb1LJFZkbzhW';
-const RPCS=['https://api.mainnet-beta.solana.com','https://solana-rpc.publicnode.com'];
-export const ALLOC_PREMINT=Number(localStorage.agisPremint||0); // team+eco already minted (set when vesting mints happen)
+const RPCS=['https://solana-rpc.publicnode.com','https://api.mainnet-beta.solana.com'];
+export const ALLOC_PREMINT=Number(localStorage.agisPremint||1.5e9); // team 10% + eco 5% pre-minted = 1.5B (on-chain supply at launch)
 async function rpc(method,params){for(const u of RPCS){try{const t=performance.now(),r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(6000)});const j=await r.json();if(j.result!==undefined)return{res:j.result,ms:Math.round(performance.now()-t),rpc:u}}catch(e){}}throw new Error('rpc down')}
 export async function snapshot(){const s=await rpc('getTokenSupply',[MINT]),h=await rpc('getHealth',[]).catch(()=>({res:'unknown'})),slot=await rpc('getSlot',[]).catch(()=>({res:0}));
  const supply=+s.res.value.uiAmountString,minted=Math.max(supply,+(localStorage.agisMaxSeen||0));localStorage.agisMaxSeen=minted;
  const o={t:Date.now(),supply,mined:Math.max(0,supply-ALLOC_PREMINT),burned:+(minted-supply).toFixed(4),ms:s.ms,health:h.res==='ok'?'OK':String(h.res),slot:slot.res};
  const H=JSON.parse(localStorage.agisHist||'[]');H.push(o);localStorage.agisHist=JSON.stringify(H.slice(-500));return o}
 export const hist=()=>JSON.parse(localStorage.agisHist||'[]');
-export const fmt=x=>x>=1e9?(x/1e9).toFixed(2)+'B':x>=1e6?(x/1e6).toFixed(2)+'M':x>=1e3?(x/1e3).toFixed(1)+'K':(+x).toFixed(2);
+export const fmt=x=>x>=1e9?(x/1e9).toFixed(2)+'B':x>=1e6?(x/1e6).toFixed(2)+'M':x>=1e3?(x/1e3).toFixed(1)+"K":(+x).toFixed(4);
 export function spark(c,vals,col='#22d3ee'){const x=c.getContext('2d'),W=c.width=c.clientWidth,H=c.height;x.clearRect(0,0,W,H);if(vals.length<2){x.fillStyle='#475569';x.font='11px monospace';x.fillText('collecting data…',8,H/2);return}
  const lo=Math.min(...vals),hi=Math.max(...vals),r=hi-lo||1;x.beginPath();vals.forEach((v,i)=>x[i?'lineTo':'moveTo'](i/(vals.length-1)*W,H-4-(v-lo)/r*(H-8)));x.strokeStyle=col;x.lineWidth=1.5;x.stroke()}
 // Mounts a compact live strip into any element with [data-live-strip]
