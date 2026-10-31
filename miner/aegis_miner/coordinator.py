@@ -34,6 +34,7 @@ def health():
             "peer_liveness": consensus.peer_liveness(peers),
             "peer_health": consensus.PEER_HEALTH.summary(peers), "protocol_version": PROTOCOL_VERSION, "claim_schema": CLAIM_SCHEMA,
             "weighting": weighting_summary(), "peer_weights": consensus.PEER_HEALTH.breakdowns(peers),
+            "peer_agreement": consensus.PEER_HEALTH.agreement_rates(peers),
             "quorum_strength": dict(consensus.STRENGTH.summary(), min_strength=consensus.env_min_strength())}
 
 def weighting_summary(env=None):
@@ -153,7 +154,8 @@ class H(BaseHTTPRequestHandler):
             try:
                 if self.path == "/v1/fetch-check": return self._send(200, _v.check_url_only(url, claim_text=claim))
                 return self._send(200, _c.consensus_alive(url, claim, os.environ.get("AEGIS_PEERS", "").split(","), quorum=2,
-                                                          weighted=_c.resolve_weighted(b.get("weighted"))))
+                                                          weighted=_c.resolve_weighted(b.get("weighted")),
+                                                          min_strength=_c.resolve_min_strength(b.get("min_strength"))))
             except Exception as e: return self._send(400, {"error": str(e)[:200]})
         if self.path != "/api/vote": return self._send(404, {"error": "not found"})
         try: v = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))

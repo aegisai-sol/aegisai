@@ -199,7 +199,16 @@ class PeerHealth:
     def observe_vote(self, endpoint, agreed):
         s = self._s.setdefault(endpoint, {"alive": True, "fails": 0, "oks": 0})
         s["disagree"] = 0 if agreed else s.get("disagree", 0) + 1
+        s["votes"] = s.get("votes", 0) + 1; s["agreed"] = s.get("agreed", 0) + (1 if agreed else 0)
         return s["disagree"]
+
+    def agreement_rates(self, endpoints):
+        """{peerN: {agreed, votes, rate}} lifetime agreement with reached consensus; rate None if no votes. Ids only."""
+        out = {}
+        for i, e in enumerate(endpoints):
+            s = self._s.get(e, {}); v = s.get("votes", 0); a = s.get("agreed", 0)
+            out[f"peer{i}"] = {"agreed": a, "votes": v, "rate": round(a / v, 6) if v else None}
+        return out
 
     def disagree_factor(self, endpoint):
         d = self._s.get(endpoint, {}).get("disagree", 0)
@@ -305,6 +314,7 @@ def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node
         w = dict(health.weights(_p)); w.setdefault("self", 1.0)
     ms = env_min_strength() if min_strength is None else min_strength
     rec = consensus(url, claim_text, nodes, quorum=quorum, weights=w, min_strength=ms)
+    rec["min_strength_applied"] = {"value": ms, "source": "env" if min_strength is None else "request"}
     t = tracker or STRENGTH; t.record(rec["quorum_strength"], rec["status"])
     if rec.get("reason") == "low_strength": t.note_downgrade()
     peers = [p.strip() for p in peer_endpoints if p and p.strip()]
@@ -329,6 +339,15 @@ def attach_breakdowns(health, endpoints, results):
     for e, r in zip(endpoints, results): r["weight"] = health.breakdown(e)
     return results
 
+
+def resolve_min_strength(body_value):
+    """Per-request min_strength: None -> env default (returns None); else finite number in [0,1] (not bool)."""
+    import math
+    if body_value is None: return None
+    if isinstance(body_value, bool) or not isinstance(body_value, (int, float)) or not math.isfinite(body_value) \
+            or not 0.0 <= body_value <= 1.0:
+        raise ValueError("min_strength must be a number in [0,1]")
+    return float(body_value)
 
 # --- quorum strength rolling stats + AEGIS_MIN_STRENGTH ---
 def env_min_strength(env=None):
