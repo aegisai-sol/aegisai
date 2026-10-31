@@ -20,6 +20,14 @@ def fee_preview(b, reservoir):
     r = reservoir.split_fee(fee, votes, bool(b.get("flagged")))
     r.update(split_bps=reservoir.SPLIT_BPS, source="coordinator", note="Off-chain preview only; no token minted, no payouts live.")
     return r
+START = time.time()
+def health():
+    """Liveness + config summary. Never exposes peer URLs or keys, only counts."""
+    peers = [p for p in os.environ.get("AEGIS_PEERS", "").split(",") if p.strip()]
+    return {"ok": True, "uptime_s": int(time.time() - START), "peers": len(peers), "quorum": 2,
+            "citation_policy": "https-only" if os.environ.get("AEGIS_ALLOW_HTTP") != "1" else "http-allowed(dev)",
+            "max_redirects": verify.MAX_REDIRECTS, "anchor": "devnet" if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" else "off",
+            "token_mode": token_bridge.state_from_env().mode}
 class H(BaseHTTPRequestHandler):
     def _send(self, code, obj):
         b = json.dumps(obj).encode(); self.send_response(code)
@@ -47,6 +55,7 @@ class H(BaseHTTPRequestHandler):
             self._send(200, token_bridge.claim_quote(CREDITS, cid, tot, token_bridge.state_from_env()))
         elif self.path == "/v1/token-state":
             st = token_bridge.state_from_env(); self._send(200, {"mode": st.mode, "mint": st.mint()})
+        elif self.path == "/v1/health": self._send(200, health())
         elif self.path == "/api/votes": self._send(200, VOTES[-100:])
         else: self._send(404, {"error": "not found"})
     def do_POST(self):
