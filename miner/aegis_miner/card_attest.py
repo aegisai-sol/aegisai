@@ -386,3 +386,41 @@ def check_card_retracted(card, retractions, trusted_pubkeys, rotations=None, rev
         return {"retracted": True, "reason": best[3], "retracted_at": best[4], "superseded_by": best[5], "signer": best[0]}
     except Exception:
         return {"retracted": False}
+
+MAX_SUPERSESSION_DEPTH = 16
+
+def resolve_current_card(card, successors, retractions, trusted_pubkeys, rotations=None, revocations=None):
+    """Follow pov-r/card-retract/1 'superseded' links from an old card to the card that currently vouches.
+    A reader holding a screenshot of a superseded card learns not just "stale" but WHICH card replaced it, and can
+    verify the replacement offline. Every hop must be a trusted card (verify_card_chain), the retraction must be
+    authorised (check_card_retracted), the successor must carry the named receipt_id and must not predate its
+    predecessor (no backdated replacement). Fail-closed: two different trusted successors for one receipt_id
+    ('ambiguous', a split view), a cycle, or depth > MAX_SUPERSESSION_DEPTH. Returns
+    {status, reason, current, path}; status: current | retracted | successor_missing | invalid. path lists the
+    receipt_ids walked (start first). Never raises."""
+    try:
+        v = verify_card_chain(card, trusted_pubkeys, rotations, revocations)
+        if not v.get("ok"): return {"status": "invalid", "reason": f"start card: {v.get('reason')}", "current": None, "path": []}
+        pool = {}
+        for s in list(successors or [])[:MAX_BUNDLE_STATEMENTS]:
+            if not isinstance(s, dict) or not verify_card_chain(s, trusted_pubkeys, rotations, revocations).get("ok"): continue
+            pool.setdefault(s.get("receipt_id"), {})[s.get("digest")] = s
+        cur, path, seen = card, [card.get("receipt_id")], {(card.get("receipt_id"), card.get("digest"))}
+        for _ in range(MAX_SUPERSESSION_DEPTH + 1):
+            rt = check_card_retracted(cur, retractions, trusted_pubkeys, rotations, revocations)
+            if not rt.get("retracted"): return {"status": "current", "reason": None, "current": cur, "path": path}
+            if rt["reason"] != "superseded":
+                return {"status": "retracted", "reason": rt["reason"], "current": None, "path": path}
+            nxt = pool.get(rt["superseded_by"], {})
+            if not nxt: return {"status": "successor_missing", "reason": f"superseded by {rt['superseded_by']}", "current": None,
+                                "path": path + [rt["superseded_by"]]}
+            if len(nxt) > 1: return {"status": "invalid", "reason": "ambiguous successor (conflicting cards)", "current": None, "path": path}
+            s = next(iter(nxt.values()))
+            if not _num(s.get("ts")) or not _num(cur.get("ts")) or s["ts"] < cur["ts"]:
+                return {"status": "invalid", "reason": "successor predates superseded card", "current": None, "path": path}
+            key = (s.get("receipt_id"), s.get("digest"))
+            if key in seen: return {"status": "invalid", "reason": "supersession cycle", "current": None, "path": path}
+            seen.add(key); path.append(s.get("receipt_id")); cur = s
+        return {"status": "invalid", "reason": "supersession chain too deep", "current": None, "path": path}
+    except Exception as e:
+        return {"status": "invalid", "reason": f"malformed: {type(e).__name__}", "current": None, "path": []}

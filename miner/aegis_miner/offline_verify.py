@@ -105,6 +105,7 @@ def main(argv=None):
     p.add_argument("--bundle", help="signed trust bundle JSON (pov-r/trust-bundle/1); its rotations/revocations/retractions are used, needs --pubkey")
     p.add_argument("--equivocation", action="append", help="equivocation proof JSON (pov-r/equivocation/1); repeatable; a proven-equivocating bundle signer is rejected")
     p.add_argument("--retraction", action="append", help="signed card retraction JSON (pov-r/card-retract/1); repeatable; needs --pubkey")
+    p.add_argument("--successor", action="append", help="candidate replacement proof card JSON; repeatable; with --retraction, follows 'superseded' links to the card that currently vouches")
     p.add_argument("--now", type=float, help="unix time for bundle expiry check")
     p.add_argument("--min-seq", type=int, help="last accepted bundle seq (rollback protection)")
     p.add_argument("--allow-untrusted", action="store_true", help="exit 0 on ok even without pinned root/leaf_count")
@@ -116,6 +117,7 @@ def main(argv=None):
         bundle = _load(a.bundle) if a.bundle else None
         eqs = [_load(x) for x in a.equivocation or []]
         rets = [_load(x) for x in a.retraction or []]
+        succ = [_load(x) for x in a.successor or []]
     except (OSError, ValueError) as e:
         print(json.dumps({"ok": False, "trusted": False, "reason": f"cannot read input: {e}"})); return 2
     if bundle is not None:
@@ -129,6 +131,11 @@ def main(argv=None):
         print(json.dumps({"ok": False, "trusted": False, "reason": "--retraction needs --pubkey"})); return 1
     r = verify_offline(obj, card, a.root, a.leaf_count, a.pubkey, revs, rots, rets)
     if bundle is not None: r["bundle_seq"] = b["seq"]
+    if r.get("retracted") and r.get("superseded_by") and card is not None:
+        sc = ca.resolve_current_card(card, succ, rets, a.pubkey, rots, revs)
+        r["supersession"] = {"status": sc["status"], "reason": sc["reason"], "path": sc["path"],
+                             "current_receipt_id": (sc["current"] or {}).get("receipt_id"),
+                             "current_digest": (sc["current"] or {}).get("digest")}
     print(json.dumps(r, indent=2, sort_keys=True))
     return 0 if r["ok"] and (r["trusted"] or a.allow_untrusted) else 1
 
