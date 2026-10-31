@@ -8,11 +8,13 @@
 <div id="est" class="mt-4 text-xs font-mono text-slate-400"></div>
 <button id="sub" class="mt-5 w-full py-3 rounded-xl bg-gold text-navy font-bold disabled:opacity-40" disabled>Encrypt &amp; create job</button>
 <div id="keybox" class="hidden mt-4 text-xs bg-deep border border-gold/30 rounded p-3 break-all"><b class="text-gold">Save your decryption key</b> (we never see it):<div id="key" class="font-mono mt-1"></div></div></section>
-<section class="lg:col-span-3 panel p-6"><div class="flex items-center"><h2 class="text-lg font-bold">Jobs queue</h2><span class="ml-auto text-[11px] px-2 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-400/30">Local queue · network jobs API coming online</span></div>
+<section class="lg:col-span-3 panel p-6"><div class="flex items-center"><h2 class="text-lg font-bold">Jobs queue</h2><span class="ml-auto text-[11px] px-2 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-400/30"><span id="apist">checking network…</span></span></div>
 <table class="w-full text-sm mt-4"><thead class="text-xs text-slate-500 text-left"><tr><th class="py-2">Job</th><th>Size</th><th>Mult.</th><th>Est. time</th><th>Reward cap</th><th>Status</th></tr></thead><tbody id="q" class="font-mono text-xs"></tbody></table>
 <p class="text-xs text-slate-500 mt-6">How it works: file → SHA-256 hash → AES-GCM encrypt → job card (hash, size, multiplier) → miners pull the encrypted blob, run integrity/format/consistency checks and vote → result sealed on Solana as a receipt. Reward = base × size × duration × compute (capped 25 AGIS/job).</p></section></main>
 <script type="module" src="js/wallet.js"></script><script type="module">
 import {rwaFactors,rwaReward,estUnits,TIERS,jobs} from './js/tokenomics.js';
+import {health,createJob,getJob,b64} from './js/rwa-jobs.js';
+let online=false;health().then(h=>{online=true;$('apist').textContent='Network jobs API online · '+h.jobs+' jobs'}).catch(()=>{$('apist').textContent='Network API offline · local queue'});
 let file=null;const $=id=>document.getElementById(id);
 const fmt=b=>b>1e6?(b/1e6).toFixed(1)+' MB':(b/1e3).toFixed(0)+' KB';
 function est(){if(!file)return;const p=+$('pages').value||1,k=$('kind').value,F=rwaFactors(file.size,p,k),u=estUnits(file.size,p);
@@ -25,6 +27,8 @@ const key=await crypto.subtle.generateKey({name:'AES-GCM',length:256},true,['enc
 const enc=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,buf),raw=hex(await crypto.subtle.exportKey('raw',key));
 const p=+$('pages').value||1,k=$('kind').value,F=rwaFactors(file.size,p,k);
 const job={id:hash.slice(0,10),hash,bytes:file.size,encBytes:enc.byteLength,iv:hex(iv),kind:k,pages:p,mult:+F.mult.toFixed(2),units:estUnits(file.size,p),done:0,owner:window.agisWallet?.pubkey||null,ts:Date.now()};
-const a=jobs.all();a.push(job);jobs.save(a);$('keybox').classList.remove('hidden');$('key').textContent=raw;render()};
-function render(){const a=jobs.all().slice().reverse();$('q').innerHTML=a.length?a.map(j=>`<tr class="border-t border-cyan/10"><td class="py-2 text-cyan">${j.id}</td><td>${fmt(j.bytes)}</td><td class="text-gold">×${j.mult}</td><td>~${Math.ceil(j.units/30)}m</td><td>${Math.min(25,j.mult*0.02*2.5).toFixed(2)}</td><td>${j.done>=j.units?'<span class="text-emerald-400">verified</span>':Math.round(j.done/j.units*100)+'%'}</td></tr>`).join(''):'<tr><td colspan=6 class="py-6 text-center text-slate-500">No jobs yet — upload a file.</td></tr>'}
+let net='';if(online&&enc.byteLength<2.9e6){try{const r=await createJob({fingerprint:hash,meta:{type:k,pages:p,name:file.name,iv:hex(iv),bytes:file.size},ciphertextB64:b64(enc),rewardEstimate:+rwaReward(file.size,p,k,TIERS.laptop.k,1200).toFixed(3)});job.id=r.id;job.net=1;job.status='open'}catch(e){net=' (network failed: '+e.message+' — saved locally)'}}else if(online)net=' (file >2.9MB encrypted: local queue only in v1)';
+const a=jobs.all();a.push(job);jobs.save(a);$('keybox').classList.remove('hidden');$('key').textContent=raw+(job.net?'  · Job ID: '+job.id:'')+net;render()};
+setInterval(async()=>{if(!online)return;const a=jobs.all();let ch=0;for(const x of a)if(x.net&&x.status==='open'){try{const g=await getJob(x.id);if(g.status!==x.status){x.status=g.status;ch=1}}catch{}}if(ch){jobs.save(a);render()}},15000);
+function render(){const a=jobs.all().slice().reverse();$('q').innerHTML=a.length?a.map(j=>`<tr class="border-t border-cyan/10"><td class="py-2 text-cyan">${j.id}</td><td>${fmt(j.bytes)}</td><td class="text-gold">×${j.mult}</td><td>~${Math.ceil(j.units/30)}m</td><td>${Math.min(25,j.mult*0.02*2.5).toFixed(2)}</td><td>${j.net?(j.status==='verified'?'<span class="text-emerald-400">verified</span>':j.status==='failed'?'<span class="text-rose-400">failed</span>':'<span class="text-amber-300">open · net</span>'):j.done>=j.units?'<span class="text-emerald-400">verified</span>':Math.round(j.done/j.units*100)+'%'}</td></tr>`).join(''):'<tr><td colspan=6 class="py-6 text-center text-slate-500">No jobs yet — upload a file.</td></tr>'}
 render();setInterval(render,3000);</script></body></html>

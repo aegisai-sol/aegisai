@@ -34,3 +34,17 @@
 - Health: `GET /api/health`
 - Miner meta `agis-claim-url`: `https://agis-claim.onrender.com/api/claim`
 - Host: Render free (cold start ~50s after idle)
+
+## RWA jobs API v1 (live path)
+
+RWA here = **document verification** (not tokenization). The file is SHA-256 fingerprinted and AES-256-GCM encrypted in the browser; the key never leaves the user. The claim server (`agis-claim.onrender.com`) stores jobs under `./deployments/rwa-jobs/` (`index.json` + `<id>.b64` ciphertext).
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/rwa/jobs` | `{fingerprint, meta:{type,pages,name?,iv?,bytes?}, ciphertextB64?, rewardEstimate?}` → `{ok,id,created}`; body max 4 MB |
+| GET | `/api/rwa/jobs?status=open\|verified\|failed\|all` | list, no ciphertext |
+| GET | `/api/rwa/jobs/:id[?full=1]` | detail; `full=1` adds ciphertext for miners |
+| POST | `/api/rwa/jobs/:id/vote` | `{wallet,msg,sig,result:{ok,checks[]}}`, msg = `AEGIS/rwa-vote/v1|wallet|jobId|fingerprint|ts`, ed25519 verified; threshold `RWA_VOTES` (default 1) → `verified`/`failed` |
+| GET | `/api/rwa/health` | `{rwa:true,jobs,open}` (also in `/api/health`) |
+
+Rate limits per IP: 120 GET / 20 POST per minute. Client: `site/js/rwa-jobs.js` (`window.agisRwa.listJobs / integrityCheck / vote`) — the miner can call it in the next patch. `rwa.html` uses the network when it's reachable and falls back to the local queue. Not built yet: Solana memo receipt, fee burn, CDN storage. Note: Render disk is ephemeral unless a persistent disk is attached.
