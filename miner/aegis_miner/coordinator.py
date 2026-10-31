@@ -155,7 +155,8 @@ class H(BaseHTTPRequestHandler):
                 if self.path == "/v1/fetch-check": return self._send(200, _v.check_url_only(url, claim_text=claim))
                 return self._send(200, _c.consensus_alive(url, claim, os.environ.get("AEGIS_PEERS", "").split(","), quorum=2,
                                                           weighted=_c.resolve_weighted(b.get("weighted")),
-                                                          min_strength=_c.resolve_min_strength(b.get("min_strength"))))
+                                                          min_strength=_c.resolve_min_strength(b.get("min_strength")),
+                                                          agreement_threshold=_c.resolve_agreement_threshold(b.get("agreement_threshold"))))
             except Exception as e: return self._send(400, {"error": str(e)[:200]})
         if self.path != "/api/vote": return self._send(404, {"error": "not found"})
         try: v = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))

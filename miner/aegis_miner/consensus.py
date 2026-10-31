@@ -176,22 +176,22 @@ class PeerHealth:
     #   weight = 1 + bonus   -> stale streaks decay toward 1.0 (never below 1.0 while alive).
     weight_cap = 10
 
-    def breakdown(self, endpoint):
+    def breakdown(self, endpoint, agreement_threshold=None):
         """{bonus, fade, dissent, weight}: weight = 0 if dead else (1 + bonus*fade) * dissent."""
         s = self._s.get(endpoint)
-        if s is None: return {"bonus": 0.0, "fade": 1.0, "dissent": 1.0, "agreement": 1.0, "weight": 1.0, "alive": True, "floored": False}
+        if s is None: return {"bonus": 0.0, "fade": 1.0, "dissent": 1.0, "agreement": 1.0, "agreement_cut": False, "weight": 1.0, "alive": True, "floored": False}
         bonus = min(s["oks"], self.weight_cap) / self.weight_cap
         fade = 1.0
         if self.half_life > 0 and bonus > 0 and "last_ok" in s:
             fade = 0.5 ** (max(0.0, self._clock() - s["last_ok"]) / self.half_life)
         dissent = self.disagree_factor(endpoint)
-        agree_f = self.agreement_factor(endpoint)
+        agree_f = self.agreement_factor(endpoint, agreement_threshold)
         raw = (1.0 + bonus * fade) * dissent * agree_f
         # Weight floor (AEGIS_WEIGHT_FLOOR in [0,1], 0 = off): alive peers never weigh below floor.
         # Dead peers stay 0 (liveness decides exclusion, the floor never resurrects them).
         floored = s["alive"] and raw < self.weight_floor
         w = 0.0 if not s["alive"] else max(raw, self.weight_floor)
-        return {"bonus": bonus, "fade": fade, "dissent": dissent, "agreement": agree_f, "weight": w, "alive": s["alive"], "floored": floored}
+        return {"bonus": bonus, "fade": fade, "dissent": dissent, "agreement": agree_f, "agreement_cut": agree_f < 1.0, "weight": w, "alive": s["alive"], "floored": floored}
 
     def weight(self, endpoint): return self.breakdown(endpoint)["weight"]
 
@@ -228,8 +228,8 @@ class PeerHealth:
         w = self._s.get(endpoint, {}).get("window")
         return (sum(w) / len(w)) if w else None
 
-    def agreement_factor(self, endpoint):
-        t = self.agreement_threshold
+    def agreement_factor(self, endpoint, threshold=None):
+        t = self.agreement_threshold if threshold is None else threshold
         w = self._s.get(endpoint, {}).get("window")
         if t <= 0 or not w or len(w) < self.agreement_min_votes: return 1.0
         r = sum(w) / len(w)
@@ -254,9 +254,13 @@ class PeerHealth:
         """{peerN: consecutive disagreement streak} — ids only."""
         return {f"peer{i}": self._s.get(e, {}).get("disagree", 0) for i, e in enumerate(endpoints)}
 
-    def weights(self, endpoints):
+    def weights(self, endpoints, agreement_threshold=None):
         """{peerN: weight} keyed by ids only (URLs never exposed)."""
-        return {f"peer{i}": self.weight(e) for i, e in enumerate(endpoints)}
+        return {f"peer{i}": self.breakdown(e, agreement_threshold)["weight"] for i, e in enumerate(endpoints)}
+
+    def agreement_cut_ids(self, endpoints, agreement_threshold=None):
+        """Sorted ids (peerN) whose weight currently carries the low-agreement cut (factor < 1). Ids only."""
+        return [f"peer{i}" for i, e in enumerate(endpoints) if self.is_alive(e) and self.agreement_factor(e, agreement_threshold) < 1.0]
 
     def is_alive(self, endpoint): return self._s.get(endpoint, {"alive": True})["alive"]
 
@@ -271,7 +275,7 @@ class PeerHealth:
                 "weights": self.weights(endpoints), "weight_cap": self.weight_cap, "weight_half_life": self.half_life,
                 "disagree_streaks": self.disagreements(endpoints), "disagree_cap": self.disagree_cap, "weight_floor": self.weight_floor,
                 "agreement_window": self.agreement_window, "agreement_threshold": self.agreement_threshold,
-                "agreement_min_votes": self.agreement_min_votes}
+                "agreement_min_votes": self.agreement_min_votes, "agreement_cut": self.agreement_cut_ids(endpoints)}
 
     def alive_endpoints(self, endpoints): return [e for e in endpoints if self.is_alive(e)]
 
@@ -340,7 +344,7 @@ def build_nodes(peer_endpoints, health=None, quorum=2, node_factory=None):
     return nodes, {"mode": "peers", "known": len(peers), "alive": len(alive), "skipped": skipped}
 
 def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node_factory=None, weighted=False,
-                    min_strength=None, tracker=None):
+                    min_strength=None, tracker=None, agreement_threshold=None):
     """Consensus over alive peers; too few alive -> NO_CONSENSUS with reason (no exception).
     Passive health: a peer that errors during collection counts as a failed observation."""
     health = health or PEER_HEALTH
@@ -352,10 +356,13 @@ def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node
     _p = [p.strip() for p in peer_endpoints if p and p.strip()]
     w = None
     if weighted and _p:  # local self node = 1.0; peers by uptime streak (see PeerHealth.weight)
-        w = dict(health.weights(_p)); w.setdefault("self", 1.0)
+        w = dict(health.weights(_p, agreement_threshold)); w.setdefault("self", 1.0)
     ms = env_min_strength() if min_strength is None else min_strength
     rec = consensus(url, claim_text, nodes, quorum=quorum, weights=w, min_strength=ms)
     rec["min_strength_applied"] = {"value": ms, "source": "env" if min_strength is None else "request"}
+    rec["agreement_threshold_applied"] = {"value": health.agreement_threshold if agreement_threshold is None else agreement_threshold,
+                                          "source": "env" if agreement_threshold is None else "request"}
+    cut = health.agreement_cut_ids(_p, agreement_threshold) if w is not None else []  # pre-round snapshot, like weights_used
     t = tracker or STRENGTH; t.record(rec["quorum_strength"], rec["status"])
     if rec.get("reason") == "low_strength": t.note_downgrade()
     peers = [p.strip() for p in peer_endpoints if p and p.strip()]
@@ -366,7 +373,8 @@ def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node
             if rec.get("consensus_vote") is not None and r.get("vote") and not r.get("error"):
                 health.observe_vote(peers[int(nid[4:])], r["vote"] == rec["consensus_vote"])
     rec["peer_selection"] = info
-    if w is not None: rec["weights_used"] = w  # audit: ids-only weights snapshot taken BEFORE this round's observations
+    if w is not None: rec["weights_used"] = w; rec["agreement_cut"] = cut
+    # audit: ids-only weights + agreement_cut snapshot taken BEFORE this round's observations
     return rec
 
 def ping_flags(health=None, env=None):
@@ -380,6 +388,15 @@ def attach_breakdowns(health, endpoints, results):
     for e, r in zip(endpoints, results): r["weight"] = health.breakdown(e)
     return results
 
+
+def resolve_agreement_threshold(body_value):
+    """Per-request agreement_threshold: None -> env/instance default (returns None); else finite number in [0,1] (not bool)."""
+    import math
+    if body_value is None: return None
+    if isinstance(body_value, bool) or not isinstance(body_value, (int, float)) or not math.isfinite(body_value) \
+            or not 0.0 <= body_value <= 1.0:
+        raise ValueError("agreement_threshold must be a number in [0,1]")
+    return float(body_value)
 
 def resolve_min_strength(body_value):
     """Per-request min_strength: None -> env default (returns None); else finite number in [0,1] (not bool)."""
