@@ -40,6 +40,17 @@ class H(BaseHTTPRequestHandler):
         else: self._send(404, {"error": "not found"})
     def do_POST(self):
         if self.path == "/v1/verify": return self._verify()
+        if self.path in ("/v1/fetch-check", "/v1/consensus"):
+            from . import verify as _v, consensus as _c
+            try: b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)))); url, claim = b["url"], b.get("claim", "")
+            except Exception: return self._send(400, {"error": "need {url, claim}"})
+            try:
+                if self.path == "/v1/fetch-check": return self._send(200, _v.check_url_only(url, claim_text=claim))
+                peers = [_c.http_node(f"peer{i}", e) for i, e in enumerate(filter(None, os.environ.get("AEGIS_PEERS", "").split(",")))]
+                nodes = [_c.local_node("self")] + peers
+                if len(nodes) < 2: nodes.append(_c.local_node("self-b"))  # demo mode: 2 local independent fetches
+                return self._send(200, _c.consensus(url, claim, nodes, quorum=2))
+            except Exception as e: return self._send(400, {"error": str(e)[:200]})
         if self.path != "/api/vote": return self._send(404, {"error": "not found"})
         try: v = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
         except Exception: return self._send(400, {"error": "bad json"})
