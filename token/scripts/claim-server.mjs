@@ -42,15 +42,24 @@ let queue = Promise.resolve(); // serialize mints
 // ---- RWA jobs API v1 (document verification; miners see ciphertext + hash only) ----
 // On verdict: Solana Memo receipt (AEGIS/rwa/v1|id|fp|status) from payer key; never blocks the vote.
 const MEMO_PROGRAM = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
-const RWA_MEMO = process.env.RWA_MEMO !== '0';
+// Firm-paid memo is OFF by default (sealer pays from Phantom, POSTs /jobs/:id/receipt). Opt in: RWA_MEMO=1 and SEALER_PAID_ONLY!=1.
+const RWA_MEMO = process.env.RWA_MEMO === '1' && process.env.SEALER_PAID_ONLY !== '1';
 const RWA_DIR = process.env.RWA_DIR || './deployments/rwa-jobs';
 const RWA_INDEX = RWA_DIR + '/index.json';
 const RWA_MAX_BODY = 4 * 1024 * 1024;
 const RWA_VOTES_NEEDED = Number(process.env.RWA_VOTES || 1);
 fs.mkdirSync(RWA_DIR, { recursive: true });
 const rwa = fs.existsSync(RWA_INDEX) ? JSON.parse(fs.readFileSync(RWA_INDEX, 'utf8')) : { jobs: {} };
+// Sealer-paid receipt: browser sends Memo tx from Phantom, then POSTs signature here. Firm never pays.
+const rwaSealerReceipt = (id, c) => {
+  const j = rwa.jobs[id]; if (!j) return { code: 404, body: { ok: false, error: 'no such job' } };
+  const t = c && c.receiptTx;
+  if (typeof t !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(t)) return { code: 400, body: { ok: false, error: 'bad receiptTx' } };
+  j.receiptTx = t; j.receiptAt = new Date().toISOString(); j.receiptError = null; j.anchoredBy = 'sealer'; j.paidBy = 'sealer'; delete j.receiptPending;
+  rwaSave(); return { body: { ok: true, job: pub(j) } };
+};
 const rwaSave = () => fs.writeFileSync(RWA_INDEX, JSON.stringify(rwa, null, 1));
-const pub = j => ({ receiptTx: j.receiptTx ?? null, receiptError: j.receiptError ?? null, receiptAt: j.receiptAt ?? null, id: j.id, fingerprint: j.fingerprint, meta: j.meta, status: j.status, created: j.created, rewardEstimate: j.rewardEstimate ?? null, hasCiphertext: !!j.ctFile, votes: (j.votes || []).map(v => ({ wallet: v.wallet, ok: v.ok, checks: v.checks, at: v.at })) });
+const pub = j => ({ receiptTx: j.receiptTx ?? null, anchoredBy: j.anchoredBy ?? null, paidBy: j.paidBy ?? null, receiptError: j.receiptError ?? null, receiptAt: j.receiptAt ?? null, id: j.id, fingerprint: j.fingerprint, meta: j.meta, status: j.status, created: j.created, rewardEstimate: j.rewardEstimate ?? null, hasCiphertext: !!j.ctFile, votes: (j.votes || []).map(v => ({ wallet: v.wallet, ok: v.ok, checks: v.checks, at: v.at })) });
 function rwaCreate(b) {
   if (!b || typeof b.fingerprint !== 'string' || !/^[0-9a-f]{64}$/i.test(b.fingerprint)) throw 'fingerprint must be sha256 hex';
   const m = b.meta || {};
@@ -84,7 +93,7 @@ function rwaVote(id, v) {
 
 function rwaReceipt(j) {
   if (j.receiptTx || j.receiptPending) return;
-  if (!RWA_MEMO) { j.receiptTx = null; j.receiptError = 'memo disabled'; return; }
+  if (!RWA_MEMO) { j.receiptError = 'awaiting sealer receipt'; return; }
   j.receiptPending = true;
   queue = queue.then(async () => {
     try {
@@ -151,7 +160,7 @@ http.createServer((req, res) => {
       const st = qs.get('status') || 'open';
       return out(200, { ok: true, jobs: Object.values(rwa.jobs).filter(j => st === 'all' || j.status === st).sort((a, b) => b.created.localeCompare(a.created)).slice(0, 200).map(pub) });
     }
-    const m = url.match(/^\/api\/rwa\/jobs\/([0-9a-f]{12})(\/vote)?$/);
+    const m = url.match(/^\/api\/rwa\/jobs\/([0-9a-f]{12})(\/vote|\/receipt)?$/);
     if (req.method === 'GET' && m && !m[2]) {
       const j = rwa.jobs[m[1]]; if (!j) return out(404, { ok: false, error: 'no such job' });
       const r = pub(j);
@@ -164,7 +173,8 @@ http.createServer((req, res) => {
     req.on('end', () => {
       if (big) return;
       let c; try { c = JSON.parse(b); } catch { return out(400, { ok: false, error: 'bad json' }); }
-      try { out(200, m ? rwaVote(m[1], c) : rwaCreate(c)); } catch (e) { out(400, { ok: false, error: String(e.message || e) }); }
+      try { if (m && m[2] === '/receipt') { const r = rwaSealerReceipt(m[1], c); return out(r.code || 200, r.body); }
+      out(200, m ? rwaVote(m[1], c) : rwaCreate(c)); } catch (e) { out(400, { ok: false, error: String(e.message || e) }); }
     });
     return;
   }
