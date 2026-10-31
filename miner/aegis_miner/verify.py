@@ -250,11 +250,29 @@ def check_url_only(url, page_fetcher=fetch_page, claim_text=""):
     return dict(r, vote=vote, confidence=conf, support=sup, note="claim " + sup["verdict"].lower().replace("_", " ") + " by cited page")
 
 CANARY_POOL = [("7 + 5 = 12"), ("9 * 8 = 72"), ("100 - 37 = 63"), ("144 / 12 = 12"), ("15 + 27 = 42")]
+# canaries-v2: hidden patterns with known answers. FALSE traps catch "always TRUE" yes-miners;
+# big-number and division traps catch lazy/approximate miners. Never disclosed per-request.
+CANARY_POOL_V2 = [("6 * 7 = 41", "FALSE"), ("50 - 8 = 40", "FALSE"), ("1000 / 8 = 125", "TRUE"),
+                  ("12345 + 67890 = 80235", "TRUE"), ("81 / 9 = 8", "FALSE")]
+CANARY_KINDS = {"v1-true": len(CANARY_POOL), "v2": len(CANARY_POOL_V2)}
 
-def make_canary(seed=None):
+def make_canary(seed=None, v2=True):
     import random
-    t = random.Random(seed).choice(CANARY_POOL)
-    return {"claim_id": "canary-" + _id(t + str(seed)), "text": t, "canary": True, "expected": "TRUE"}
+    pool = [(t, "TRUE") for t in CANARY_POOL] + (CANARY_POOL_V2 if v2 else [])
+    t, exp = random.Random(seed).choice(pool)
+    return {"claim_id": "canary-" + _id(t + str(seed)), "text": t, "canary": True, "expected": exp}
+
+def make_canaries(seed=None, n=2):
+    """n distinct canaries; at least one FALSE trap when n>=2 so a yes-miner can't pass."""
+    import random
+    r = random.Random(seed); out = []
+    if n >= 2:
+        t, e = r.choice([c for c in CANARY_POOL_V2 if c[1] == "FALSE"])
+        out.append({"claim_id": "canary-" + _id(t + str(seed) + "f"), "text": t, "canary": True, "expected": e})
+    while len(out) < n:
+        c = make_canary(f"{seed}-{len(out)}-{r.random()}")
+        if c["text"] not in {o["text"] for o in out}: out.append(c)
+    return out
 
 def canary_ok(claims, client_votes=None):
     """Calibration: every canary must be voted TRUE (by the server and, if given, by the client/miner)."""

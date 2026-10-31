@@ -49,8 +49,8 @@ def test_url_only():
 
 def test_canary():
     c = verify.make_canary("x"); c.update(verify.check_claim(c))
-    assert c["vote"] == "TRUE" and verify.canary_ok([c])[0]
-    assert not verify.canary_ok([c], {c["claim_id"]: "FALSE"})[0]
+    assert c["vote"] == c["expected"] and verify.canary_ok([c])[0]
+    assert not verify.canary_ok([c], {c["claim_id"]: ("TRUE" if c["expected"] == "FALSE" else "FALSE")})[0]
 
 
 PAGE = ("Example", "Solana launched its mainnet beta in 2020. The network targets 400 ms block times. "

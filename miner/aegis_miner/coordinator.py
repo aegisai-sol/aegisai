@@ -1,7 +1,7 @@
 """Mock coordinator API (stdlib). GET /api/stats, POST /api/vote, GET /api/votes. CORS open for local dev.
 Run: python3 -m aegis_miner.coordinator [port=8787]. Replace with a real service + Solana indexer later."""
 import json, os, random, sys, time, uuid
-from aegis_miner import verify, credits, token_bridge
+from aegis_miner import verify, credits, token_bridge, consensus
 DATA = os.environ.get("AEGIS_DATA", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"))
 RECEIPTS, CREDITS = os.path.join(DATA, "receipts"), os.path.join(DATA, "credits.jsonl")
 RESERVOIR_NOTE = "Proof Credits are non-transferable; AGIS conversion only vs paid fees, capped <=70% fees / <=0.5% Reservoir per period. No mint yet (Option A)."
@@ -27,7 +27,8 @@ def health():
     return {"ok": True, "uptime_s": int(time.time() - START), "peers": len(peers), "quorum": 2,
             "citation_policy": "https-only" if os.environ.get("AEGIS_ALLOW_HTTP") != "1" else "http-allowed(dev)",
             "max_redirects": verify.MAX_REDIRECTS, "anchor": "devnet" if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" else "off",
-            "token_mode": token_bridge.state_from_env().mode}
+            "token_mode": token_bridge.state_from_env().mode,
+            "peer_liveness": consensus.peer_liveness(peers)}
 def list_receipts(limit=20, offset=0):
     """Newest-first page of receipt summaries (id, mtime, status). No bodies, so pages stay small."""
     ids = sorted((f for f in (os.listdir(RECEIPTS) if os.path.isdir(RECEIPTS) else []) if f.endswith(".json")),
@@ -49,7 +50,7 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
                                      ("/v1/fee-preview", "post", "Preview 70/20/5/5 fee split"),
                                      ("/v1/fetch-check", "post", "Fetch-only source check"),
                                      ("/v1/consensus", "post", "Multi-node quorum verify"),
-                                     ("/v1/health", "get", "Coordinator health"),
+                                     ("/v1/health", "get", "Coordinator health"), ("/v1/peers/ping", "get", "Probe peer liveness (ids only, no URLs)"),
                                      ("/v1/receipts", "get", "Paginated receipt summaries (limit, offset)"),
                                      ("/v1/receipts/{id}", "get", "Single receipt"),
                                      ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
@@ -102,6 +103,9 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/v1/token-state":
             st = token_bridge.state_from_env(); self._send(200, {"mode": st.mode, "mint": st.mint()})
         elif self.path == "/v1/health": self._send(200, health())
+        elif self.path == "/v1/peers/ping":
+            peers = [p for p in os.environ.get("AEGIS_PEERS", "").split(",") if p.strip()]
+            self._send(200, {"peers": consensus.ping_peers(peers), "quorum": 2})
         elif self.path == "/v1/openapi.json": self._send(200, OPENAPI)
         elif self.path == "/v1/metrics": self._send(200, dict(METRICS))
         elif self.path == "/api/votes": self._send(200, VOTES[-100:])
@@ -136,7 +140,7 @@ class H(BaseHTTPRequestHandler):
         cid = str(body.get("client_id") or "anon")[:64]
         rid = uuid.uuid4().hex[:16]
         claims = [dict(c, **verify.check_claim(c)) for c in verify.decompose(text)[:50]]
-        can = verify.make_canary(rid); claims.append(dict(can, **verify.check_claim(can)))
+        claims += [dict(c, **verify.check_claim(c)) for c in verify.make_canaries(rid, 2)]
         ok, bad = verify.canary_ok(claims, body.get("client_votes"))
         n = credits.award(CREDITS, cid, rid, [c for c in claims if not c.get("canary")]) if ok else 0
         rec = {"receipt_id": rid, "client_id": cid, "ts": time.time(), "claims": claims,

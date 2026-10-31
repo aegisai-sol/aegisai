@@ -56,3 +56,32 @@ def canonical_json(x) -> str:
 def receipt_digest(body) -> str:
     import hashlib as _h
     return "sha256:" + _h.sha256(canonical_json(body).encode()).hexdigest()
+
+
+# --- peer liveness: ids peer0..N only; URLs/keys never returned ---
+import time as _time
+_LAST_OK = {}
+
+def _default_get(endpoint, timeout):
+    import urllib.request
+    with urllib.request.urlopen(endpoint.rstrip("/") + "/v1/health", timeout=timeout) as r:
+        return json.loads(r.read())
+
+def ping_peers(endpoints, timeout=2.0, getter=None, now=_time.time):
+    getter = getter or _default_get
+    def one(ie):
+        i, e = ie; pid = f"peer{i}"; t0 = _time.monotonic()
+        try:
+            h = getter(e, timeout); ok = bool(h.get("ok")) if isinstance(h, dict) else False
+            err = None if ok else "unhealthy"
+        except Exception as ex: ok, err = False, type(ex).__name__
+        if ok: _LAST_OK[e] = now()
+        return {"id": pid, "ok": ok, "latency_ms": int((_time.monotonic() - t0) * 1000),
+                "last_ok": _LAST_OK.get(e), **({"error": err} if err else {})}
+    if not endpoints: return []
+    with ThreadPoolExecutor(max_workers=len(endpoints)) as ex: return list(ex.map(one, enumerate(endpoints)))
+
+def peer_liveness(endpoints, now=_time.time, stale_s=300):
+    """Cached summary for /v1/health (no network call)."""
+    t = now(); live = sum(1 for e in endpoints if e in _LAST_OK and t - _LAST_OK[e] <= stale_s)
+    return {"live": live, "known": len(endpoints), "stale_after_s": stale_s}

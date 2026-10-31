@@ -67,3 +67,7 @@ The novelty is the **combination**: micro-inference on weak heterogeneous hardwa
 - Small models are weaker than frontier models; PoV relies on decomposition, rules, quorum and escalation, not on any single node being smart.
 - Phones mine only while the PWA is open (browser background limits).
 - Phase 1 coordinator is centralized. No audit yet. Not financial advice.
+
+## Canaries v2 & peer liveness
+- Each `/v1/verify` request hides 2 canaries; at least one is a **FALSE trap** (e.g. a wrong product), so an "always TRUE" miner fails calibration and earns 0 credits. Pool also covers large-number and division checks. Patterns live in `verify.CANARY_POOL_V2`.
+- `GET /v1/peers/ping` probes each `AEGIS_PEERS` entry's `/v1/health` (2s timeout) and returns `peer0..N` with `ok`, `latency_ms`, `last_ok` — never URLs or keys. `/v1/health.peer_liveness` gives a cached live/known count (stale after 300s).
