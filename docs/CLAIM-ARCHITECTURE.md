@@ -27,3 +27,10 @@
 1. ✅ Miner protections live (≤1/s, worker, hidden-pause, light-load badge).
 2. ⏳ Deploy claim API on a host (not yet) with the rules above.
 3. ⏳ Set `<meta name="agis-claim-url" content="https://…/claim">` in `miner.html`. Until then, **Claim mint is OFF** — signed claims are saved locally only.
+
+
+## Live Claim (2026-10-31)
+- Public API: `https://agis-claim.onrender.com`
+- Health: `GET /api/health`
+- Miner meta `agis-claim-url`: `https://agis-claim.onrender.com/api/claim`
+- Host: Render free (cold start ~50s after idle)

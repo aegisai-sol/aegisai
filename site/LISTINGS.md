@@ -16,3 +16,8 @@ Never pay "listing agents" who promise guaranteed listings — common scam.
 - **DexScreener:** listed automatically once a Raydium/Meteora pool exists. After that, "Enhanced Token Info" (logo, socials) costs ~$299 at marketplace.dexscreener.com.
 - **Jupiter:** routes to the pool automatically after it's indexed. Verification at catdetlist.jup.ag (needs metadata, socials, liquidity/volume).
 - **Checklist:** ✅ Metaplex metadata/logo · ✅ website/whitepaper · ⏳ X/Telegram links in metadata · ⏳ LP + lock/burn LP tokens · ⏳ DexScreener info · ⏳ Jupiter verify · ❌ audit.
+
+
+## Status — 2026-10-31 13:41 Europe/Sofia
+- **Claim API LIVE:** https://agis-claim.onrender.com (`/api/health` OK). Miner `agis-claim-url` → `/api/claim`.
+- **LP / DexScreener / Jupiter:** still blocked on ~0.5–1 SOL for pool (wallet ~0.13 SOL).
