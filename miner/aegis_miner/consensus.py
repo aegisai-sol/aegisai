@@ -118,7 +118,10 @@ def peer_liveness(endpoints, now=_time.time, stale_s=300):
 # --- peer health hysteresis: dead after N consecutive fails, alive again after M consecutive oks ---
 class PeerHealth:
     """Flap-resistant peer state. Starts 'alive'. Ids only (peer0..N); URLs never exposed."""
-    def __init__(self, fail_threshold=3, recover_threshold=2, half_life=0.0, clock=None):
+    def __init__(self, fail_threshold=3, recover_threshold=2, half_life=0.0, clock=None, disagree_cap=4):
+        if isinstance(disagree_cap, bool) or not isinstance(disagree_cap, int) or disagree_cap < 0:
+            raise ValueError("disagree_cap must be an int >= 0")
+        self.disagree_cap = disagree_cap  # 0 disables disagreement decay
         if fail_threshold < 1 or recover_threshold < 1: raise ValueError("thresholds must be >= 1")
         self.n, self.m = int(fail_threshold), int(recover_threshold)
         import math, time as _t
@@ -149,22 +152,30 @@ class PeerHealth:
     #   weight = 1 + bonus   -> stale streaks decay toward 1.0 (never below 1.0 while alive).
     weight_cap = 10
 
-    def weight(self, endpoint):
+    def breakdown(self, endpoint):
+        """{bonus, fade, dissent, weight}: weight = 0 if dead else (1 + bonus*fade) * dissent."""
         s = self._s.get(endpoint)
-        if s is None: return 1.0
-        if not s["alive"]: return 0.0
+        if s is None: return {"bonus": 0.0, "fade": 1.0, "dissent": 1.0, "weight": 1.0, "alive": True}
         bonus = min(s["oks"], self.weight_cap) / self.weight_cap
+        fade = 1.0
         if self.half_life > 0 and bonus > 0 and "last_ok" in s:
-            idle = max(0.0, self._clock() - s["last_ok"])
-            bonus *= 0.5 ** (idle / self.half_life)
-        return (1.0 + bonus) * self.disagree_factor(endpoint)
+            fade = 0.5 ** (max(0.0, self._clock() - s["last_ok"]) / self.half_life)
+        dissent = self.disagree_factor(endpoint)
+        w = 0.0 if not s["alive"] else (1.0 + bonus * fade) * dissent
+        return {"bonus": bonus, "fade": fade, "dissent": dissent, "weight": w, "alive": s["alive"]}
+
+    def weight(self, endpoint): return self.breakdown(endpoint)["weight"]
+
+    def breakdowns(self, endpoints):
+        """{peerN: breakdown} — ids only."""
+        return {f"peer{i}": self.breakdown(e) for i, e in enumerate(endpoints)}
 
     # Disagreement decay (documented contract):
     #   factor = 0.5 ** min(d, disagree_cap),  d = consecutive votes that disagreed with a reached consensus
     #   weight = (1 + bonus) * factor  -> a chronic dissenter fades toward (1+bonus)/2**cap (cap=4 -> >= 1/16),
     #   never 0 (liveness, not disagreement, decides exclusion). One agreeing vote resets d to 0.
     #   Votes when no consensus was reached (consensus_vote None) or errored votes don't count either way.
-    disagree_cap = 4
+    # disagree_cap: per-instance (ctor / env AEGIS_DISAGREE_CAP, default 4, 0 = decay off)
 
     def observe_vote(self, endpoint, agreed):
         s = self._s.setdefault(endpoint, {"alive": True, "fails": 0, "oks": 0})
@@ -210,6 +221,14 @@ def _env_float(name, default):
         return v if math.isfinite(v) and v >= 0 else default
     except ValueError: return default
 
+def _env_cap(name, default, env=None, hi=16):
+    """Int in [0, hi]; invalid/negative -> default; above hi -> hi (bounds the 1/2**cap floor)."""
+    import os
+    env = os.environ if env is None else env
+    try: v = int(str(env.get(name, default)).strip())
+    except ValueError: return default
+    return default if v < 0 else min(v, hi)
+
 _TRUTHY = {"1", "true", "yes", "on"}
 def weighted_quorum_enabled(env=None):
     """AEGIS_WEIGHTED_QUORUM truthy (1/true/yes/on, case-insensitive) -> weighted voting."""
@@ -224,7 +243,8 @@ def resolve_weighted(body_value, env=None):
     return body_value
 
 PEER_HEALTH = PeerHealth(_env_int("AEGIS_PEER_FAILS", 3), _env_int("AEGIS_PEER_RECOVERS", 2),
-                         half_life=_env_float("AEGIS_WEIGHT_HALFLIFE", 0.0))
+                         half_life=_env_float("AEGIS_WEIGHT_HALFLIFE", 0.0),
+                         disagree_cap=_env_cap("AEGIS_DISAGREE_CAP", 4))
 
 
 # --- quorum collection skips dead peers (hysteresis) ---
@@ -263,3 +283,8 @@ def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node
                 health.observe_vote(peers[int(nid[4:])], r["vote"] == rec["consensus_vote"])
     rec["peer_selection"] = info
     return rec
+
+def attach_breakdowns(health, endpoints, results):
+    """Add ids-only weight breakdown to ping results (no URLs; keyed by position)."""
+    for e, r in zip(endpoints, results): r["weight"] = health.breakdown(e)
+    return results
