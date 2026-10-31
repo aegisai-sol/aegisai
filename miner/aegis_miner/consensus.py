@@ -67,13 +67,24 @@ def _default_get(endpoint, timeout):
     with urllib.request.urlopen(endpoint.rstrip("/") + "/v1/health", timeout=timeout) as r:
         return json.loads(r.read())
 
-def ping_peers(endpoints, timeout=2.0, getter=None, now=_time.time):
+def peer_compat(h, expect):
+    """Capability handshake: (ok, reason). Peer advertising a different protocol_version/claim_schema is refused;
+    a peer advertising neither is treated as legacy-compatible."""
+    if not expect or not isinstance(h, dict): return True, None
+    pv, cs = expect
+    if "protocol_version" in h and h["protocol_version"] != pv: return False, "protocol_mismatch"
+    if "claim_schema" in h and h["claim_schema"] != cs: return False, "claim_schema_mismatch"
+    return True, None
+
+def ping_peers(endpoints, timeout=2.0, getter=None, now=_time.time, expect=None):
     getter = getter or _default_get
     def one(ie):
         i, e = ie; pid = f"peer{i}"; t0 = _time.monotonic()
         try:
             h = getter(e, timeout); ok = bool(h.get("ok")) if isinstance(h, dict) else False
             err = None if ok else "unhealthy"
+            if ok:
+                ok, err = peer_compat(h, expect)
         except Exception as ex: ok, err = False, type(ex).__name__
         if ok: _LAST_OK[e] = now()
         return {"id": pid, "ok": ok, "latency_ms": int((_time.monotonic() - t0) * 1000),

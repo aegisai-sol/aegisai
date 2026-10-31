@@ -80,15 +80,19 @@ def decide(action, store, claim=None, digest=None, now=None, nonce=None):
     if hit: return dict(base, decision="ALLOW", reason="valid receipt supports claim", receipt_id=hit["receipt_id"])
     return dict(base, decision="REQUIRE_RECEIPT", reason="no valid supporting receipt; call POST /v1/verify first" if not seen else "only unsure/flagged/expired receipts")
 
-def decide_batch(action, store, claims):
-    """Gate many claims for one action. Overall: DENY if any DENY, else REQUIRE_RECEIPT if any, else ALLOW."""
+def decide_batch(action, store, claims, nonce=None):
+    """Gate many claims for one action. Overall: DENY if any DENY, else REQUIRE_RECEIPT if any, else ALLOW.
+    Optional nonce: same freshness binding as decide() (only the receipt carrying it counts; duplicate nonce -> DENY replay)."""
+    if nonce is not None and not valid_nonce(nonce): raise ValueError("nonce must be 8-128 chars [A-Za-z0-9_-]")
     if not isinstance(claims, list) or not claims: raise ValueError("claims must be a non-empty list")
     if len(claims) > MAX_BATCH: raise ValueError(f"max {MAX_BATCH} claims per batch")
     now = time.time(); res = []
     for c in claims:
-        r = decide(action, store, digest=c[7:]) if isinstance(c, str) and c.startswith("digest:") else decide(action, store, claim=c, now=now)
+        r = decide(action, store, digest=c[7:], now=now, nonce=nonce) if isinstance(c, str) and c.startswith("digest:") else decide(action, store, claim=c, now=now, nonce=nonce)
         res.append({k: r[k] for k in ("claim_digest", "decision", "reason")} | ({"receipt_id": r["receipt_id"]} if "receipt_id" in r else {}))
     ds = {r["decision"] for r in res}
     overall = "DENY" if "DENY" in ds else "REQUIRE_RECEIPT" if "REQUIRE_RECEIPT" in ds else "ALLOW"
-    return {"action": action, "decision": overall, "count": len(res), "results": res, "ttl_s": ttl_s(),
-            "note": "Gate is advisory and read-only; no signing or on-chain action."}
+    out = {"action": action, "decision": overall, "count": len(res), "results": res, "ttl_s": ttl_s(),
+           "note": "Gate is advisory and read-only; no signing or on-chain action."}
+    if nonce is not None: out["nonce"] = nonce
+    return out

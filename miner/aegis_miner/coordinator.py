@@ -32,7 +32,7 @@ def health():
             "max_redirects": verify.MAX_REDIRECTS, "anchor": "devnet" if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" else "off",
             "token_mode": token_bridge.state_from_env().mode,
             "peer_liveness": consensus.peer_liveness(peers),
-            "peer_health": consensus.PEER_HEALTH.summary(peers), "protocol_version": PROTOCOL_VERSION}
+            "peer_health": consensus.PEER_HEALTH.summary(peers), "protocol_version": PROTOCOL_VERSION, "claim_schema": CLAIM_SCHEMA}
 def list_receipts(limit=20, offset=0):
     """Newest-first page of receipt summaries (id, mtime, status). No bodies, so pages stay small."""
     ids = sorted((f for f in (os.listdir(RECEIPTS) if os.path.isdir(RECEIPTS) else []) if f.endswith(".json")),
@@ -111,7 +111,7 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/v1/health": self._send(200, health())
         elif self.path == "/v1/peers/ping":
             peers = [p for p in os.environ.get("AEGIS_PEERS", "").split(",") if p.strip()]
-            self._send(200, {"peers": consensus.PEER_HEALTH.observe_pings(peers, consensus.ping_peers(peers)), "quorum": 2})
+            self._send(200, {"peers": consensus.PEER_HEALTH.observe_pings(peers, consensus.ping_peers(peers, expect=(PROTOCOL_VERSION, CLAIM_SCHEMA))), "quorum": 2})
         elif self.path == "/v1/openapi.json": self._send(200, OPENAPI)
         elif self.path == "/v1/metrics": self._send(200, dict(METRICS))
         elif self.path == "/api/votes": self._send(200, VOTES[-100:])
@@ -126,7 +126,7 @@ class H(BaseHTTPRequestHandler):
             from . import gate
             try:
                 b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-                return self._send(200, gate.decide_batch(b.get("action"), RECEIPTS, b.get("claims")))
+                return self._send(200, gate.decide_batch(b.get("action"), RECEIPTS, b.get("claims"), nonce=b.get("nonce")))
             except Exception as e: return self._send(400, {"error": str(e)[:200]})
         if self.path == "/v1/gate":
             from . import gate
