@@ -70,6 +70,14 @@ Note: the 5% "burn" bucket in `reservoir.SPLIT_BPS` is fee-split accounting and 
 burn. Miner pay stays job-scoped from the Reservoir (`pov-r/credit-settle/1`). Still to ship under BME+: stake-to-mine,
 stake-to-API, oracle/anchor burn, governance.
 
+## Stake-to-mine (pov-r/stake-mine/1, BME+)
+
+To earn mining weight on verify jobs, a miner locks (stakes) whole AGIS. Weight = `min(cap, floor + isqrt(stake))`
+(defaults floor 1, cap 1000; zero stake = not eligible), so small stakes still count, more stake helps with diminishing
+returns, and whales saturate. Unstaking starts a cool-down (default 7 days); stake in cool-down earns no weight and is
+released only by `finalize_unstake` after `unlock_at`. Bad input fails closed with nothing changed.
+(`miner/aegis_miner/stake_mine.py`; in-memory library only, no mint, no on-chain tx.)
+
 ## Proof Credits → AGIS (pov-r/credit-settle/1, job-scoped)
 In plain words: **AGIS is only paid out of a real customer's payment for one specific verification.** When a job is
 paid, its fee splits 70% miners / 20% Reservoir / 5% treasury / 5% burn; the 70% is shared only among the miners who
