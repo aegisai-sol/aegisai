@@ -1,6 +1,6 @@
 # AegisAI Whitepaper — Proof-of-Verification Reservoir (PoV-R)
 
-*Version 0.2 · 31 October 2026 · Status: MVP / pre-TGE (Option A — no token mint until audit + LP capital). Numbers are design targets, not measurements. Not financial advice.*
+*Version 0.3 · 31 October 2026 · Status: token live on Solana mainnet (CA `GhSiU95vtKwn7FBAW1u5krxYP2PnpFPotb1LJFZkbzhW`), mining claims in beta. **Audit: not yet — planned** (no third-party audit completed). Not financial advice.*
 
 ## Abstract
 AegisAI is a verification network for AI output. Instead of building another large language model, AegisAI splits AI answers into small, checkable **micro-claims**, has many low-power nodes verify them, aggregates the votes with commit–reveal consensus, and issues a **receipt** that can be anchored on Solana. The economic layer, the **Reservoir**, rewards correct verification with **Proof Credits** that convert to AGIS only against real, paid verification fees.
@@ -30,13 +30,13 @@ AegisAI is a verification network for AI output. Instead of building another lar
 - **Small models (planned)** — quantized NLI/fact classifiers (< 1 GB, ONNX/WebGPU) for claims rules can't settle.
 
 ## 5. Reservoir & Proof Credits
-- Hard cap: **1,000,000,000 AGIS**; mint authority revoked after genesis.
+- Max supply (hybrid): **10,000,000,000 AGIS** — 1B team, 500M ecosystem, remainder emitted only via mining. Mint authority held for mining emission (not yet revoked); freeze authority: none.
 - Nodes earn **Proof Credits** (off-chain ledger first, Solana later) for votes that match the final verdict and pass canaries.
 - Credits convert to AGIS **only against paid verification fees**: at most **70% of fees** per epoch and at most **0.5% of Reservoir** per epoch. No fees → no emission.
 - This ties token issuance to real usage rather than inflation.
 
 ## 6. Role of the AGIS token
-AGIS is integral to PoV-R: it pays verifiers (via Reservoir conversion), can be used for verification fees, and later for node stake/slashing. **Option A:** no mint and no trading until an external audit and LP capital from a raise exist. Product first, token second.
+AGIS is integral to PoV-R: it pays miners/verifiers, is used for verification fees, and later for node stake/slashing. Token is minted on Solana mainnet; trading/LP and a third-party audit are next steps.
 
 ## 7. AI — but not another LLM
 AegisAI does not compete with OpenAI, xAI or others. Any model's output (theirs, or a future AegisAI helper) can pass through PoV. AegisAI is the trust layer: AI produces, PoV verifies, receipts prove.
@@ -62,7 +62,8 @@ Tokenized real-world assets rely on documents (NAV reports, filings, insurance, 
 - **Live:** Verify web app (arithmetic, Proof-of-Source, calibration canaries, receipts, in-browser Proof Credits) at bold-thistle-3z5f.here.now/verify.html.
 - **Code:** github.com/aegisai-sol/aegisai — tests passing for the verify engine.
 - **Simulated:** multi-node network, browser miner, dashboard stats.
-- **Not yet:** token mint, on-chain program, audit, paying customers.
+- **Live:** SPL token on mainnet, team/eco allocations, browser/PWA miner.
+- **Not yet:** third-party audit, public claim server, liquidity pool, paying customers.
 
 ## 12. Roadmap
 | Stage | Deliverable |
@@ -73,6 +74,6 @@ Tokenized real-world assets rely on documents (NAV reports, filings, insurance, 
 | LATER | RWA Doc Check pilot, mobile app, decentralized coordinators, staking/slashing |
 
 ## 13. Risks & limitations
-Small models are weaker than frontier models; PoV relies on decomposition, rules, quorum and escalation. Phase 1 is centralized. No audit yet. Regulatory treatment of tokens varies by jurisdiction. Nothing here is an offer to sell securities or financial advice.
+Small models are weaker than frontier models; PoV relies on decomposition, rules, quorum and escalation. Phase 1 is centralized. No third-party audit yet (planned). Regulatory treatment of tokens varies by jurisdiction. Nothing here is an offer to sell securities or financial advice.
 
 *Contact: aibot.universe@gmail.com · X @AegisAI_Sol · Telegram @AegisAI_Sol*
