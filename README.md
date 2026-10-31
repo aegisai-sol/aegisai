@@ -56,3 +56,9 @@ No private keys or seeds in any repo (`.keys/`, `.env` gitignored). Never share 
 ### Receipt HMAC + claim normalizer v2
 - `AEGIS_RECEIPT_HMAC=<secret>`: coordinator adds `mac` (HMAC-SHA256 over the receipt digest); `/v1/gate` and `/v1/gate/batch` return **DENY** for receipts with a missing or bad MAC. Unset = no MAC required. The secret is never logged or returned.
 - Claims are normalized with versioned `claim_norm` v2 (NFKC, smart quotes/dashes → ASCII, zero-width stripped). The gate matches v1 and v2 digests for back-compat.
+
+## Proof Credits → AGIS (pov-r/credit-settle/1)
+Proof Credits are non-transferable work receipts. They auto-settle only against the period's Reservoir fee inflow:
+`rate = fee_inflow_agis / max(1, credits_earned_this_period)`, capped by the Reservoir balance. More paid verifies →
+better rate; credits with no fees behind them settle at zero. Settling consumes receipt-backed credits once and emits
+an Ed25519-signed AGIS claim voucher (`miner/aegis_miner/credit_settle.py`). Library only; no mint.
