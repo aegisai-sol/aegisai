@@ -145,6 +145,7 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/v1/receipts/verify":
             try:
                 b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                if isinstance(b, dict) and "receipts" in b: return self._send(200, token_bridge.audit_batch(b["receipts"], store_dir=RECEIPTS))
                 return self._send(200, token_bridge.audit_receipt(b.get("receipt", b), store_dir=RECEIPTS))
             except Exception as e: return self._send(400, {"error": str(e)[:200]})
         if self.path == "/v1/gate":

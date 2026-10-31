@@ -60,6 +60,32 @@ def audit_receipt(rec, secret=None, store_dir=None):
     return {"receipt_id": rid, "intact": intact, "digest_ok": digest_ok, "mac": mac, "known": known,
             "protocol_version": rec.get("protocol_version")}
 
+AUDIT_BATCH_MAX = 50
+
+def audit_batch(recs, secret=None, store_dir=None, max_items=AUDIT_BATCH_MAX):
+    """Audit up to max_items receipts in one call. Malformed items get an error entry (batch never 400s on one bad item).
+    In-batch replay: a receipt_id or nonce seen twice marks every later copy duplicate and not intact.
+    all_intact is True only if every item audited intact and the batch is non-empty."""
+    if not isinstance(recs, list) or not recs: raise ValueError("receipts must be a non-empty list")
+    if len(recs) > max_items: raise ValueError(f"at most {max_items} receipts per batch")
+    k = secret if secret is not None else hmac_secret()
+    seen_ids, seen_nonces, out, dup_ids, dup_nonces = set(), set(), [], [], []
+    for i, r in enumerate(recs):
+        try: a = audit_receipt(r, secret=k, store_dir=store_dir)
+        except ValueError as e:
+            out.append({"index": i, "intact": False, "error": str(e)[:120]}); continue
+        a["index"] = i; a["duplicate"] = False
+        rid, n = a["receipt_id"], r.get("nonce")
+        if rid in seen_ids: a["duplicate"] = True; dup_ids.append(rid)
+        if isinstance(n, str) and n in seen_nonces: a["duplicate"] = True; dup_nonces.append(n)
+        seen_ids.add(rid)
+        if isinstance(n, str): seen_nonces.add(n)
+        if a["duplicate"]: a["intact"] = False
+        out.append(a)
+    ok = sum(1 for a in out if a["intact"])
+    return {"count": len(out), "intact_count": ok, "all_intact": ok == len(out),
+            "duplicate_ids": sorted(set(dup_ids)), "duplicate_nonces_count": len(set(dup_nonces)), "results": out}
+
 class TokenState:
     mode = "abstract"
     def mint(self): return None
