@@ -1,6 +1,6 @@
 {
   "project": "AegisAI PoV-R",
-  "updated_at": "2026-10-31T03:49:25+02:00",
+  "updated_at": "2026-10-31T03:52:24+02:00",
   "milestones": [
     {
       "id": "decompose",
@@ -107,9 +107,18 @@
       "id": "devnet-memo",
       "title": "Receipt hash anchored on Solana devnet",
       "status": "active",
-      "updated_at": "2026-10-31T03:49:25+02:00",
-      "note": "Hook shipped (AEGIS_ANCHOR_RECEIPTS=1, default OFF, devnet only). Not yet run live on devnet",
-      "detail": "Hook shipped (AEGIS_ANCHOR_RECEIPTS=1, default OFF, devnet only). Not yet run live on devnet"
+      "updated_at": "2026-10-31T03:52:24+02:00",
+      "note": "Signed memo tx + mocked RPC CI + dry-run shipped; mainnet refused. Left: one live devnet TX with faucet SOL",
+      "detail": "Signed memo tx + mocked RPC CI + dry-run shipped; mainnet refused. Left: one live devnet TX with faucet SOL"
+    },
+    {
+      "id": "reservoir-fees",
+      "title": "Reservoir fee accounting (off-chain ledger)",
+      "status": "done",
+      "updated_at": "2026-10-31T03:52:23+02:00",
+      "note": "70% miners / 20% reservoir / 5% treasury / 5% burn, integer-exact, flagged -> reservoir. No token",
+      "commit": "bfa63c8",
+      "detail": "70% miners / 20% reservoir / 5% treasury / 5% burn, integer-exact, flagged -> reservoir. No token"
     },
     {
       "id": "mint-reservoir",
@@ -121,13 +130,13 @@
     }
   ],
   "now": "Now building: devnet receipt anchor",
-  "now_detail": "Consensus receipt digest -> Solana devnet memo (test path, default off)",
+  "now_detail": "Signed SPL Memo tx tested in CI (mock RPC). Left: first live devnet TX",
   "counts": {
     "active": 1,
     "blocked": 1,
-    "done": 12,
+    "done": 13,
     "next": 0,
-    "total": 14
+    "total": 15
   },
-  "active_progress": 30
+  "active_progress": 80
 }
