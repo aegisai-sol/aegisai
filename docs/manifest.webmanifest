@@ -1,1 +1,1 @@
-{"name":"AegisAI Miner","short_name":"AGIS","start_url":"miner.html","display":"standalone","background_color":"#060e1c","theme_color":"#0a1628","icons":[{"src":"assets/agis-logo.png","sizes":"1024x1024","type":"image/png"}]}
+{"name":"AegisAI","short_name":"AGIS","start_url":"index.html","display":"standalone","background_color":"#060e1c","theme_color":"#0a1628","icons":[{"src":"assets/agis-logo.png","sizes":"1024x1024","type":"image/png"}]}
