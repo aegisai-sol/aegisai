@@ -116,3 +116,75 @@ def verify_disclosure_set(ds, expected_root=None):
     if len(set(out["indices"])) != len(ds): return {**out, "ok": False, "reason": "duplicate index"}
     return {**out, "ok": True, "reason": None, "root": items[0]["root"], "receipt_id": ds[0].get("receipt_id"),
             "leaf_count": ds[0].get("leaf_count"), "root_source": items[0].get("root_source")}
+
+MAX_MULTI = 256
+
+def _multi_walk(n, known, sibling):
+    """Shared prover/verifier replay of the tree for a set of known leaves. sibling(level, idx) returns the
+    hash of a needed sibling that is not derivable from the known set. Returns the root."""
+    width, level = n, 0
+    while width > 1:
+        nxt = {}
+        for i in sorted(known):
+            p = i // 2
+            if p in nxt: continue
+            sib = i ^ 1
+            if sib >= width: nxt[p] = known[i]; continue
+            sh = known[sib] if sib in known else sibling(level, sib)
+            a, b = (known[i], sh) if i % 2 == 0 else (sh, known[i])
+            nxt[p] = _h(b"\x01", bytes.fromhex(a), bytes.fromhex(b))
+        known, width, level = nxt, (width + 1) // 2, level + 1
+    return known[0]
+
+def disclose_multi(rec, indices):
+    """Compact multiproof for several claims of one receipt: siblings shared between paths (or derivable from
+    other disclosed leaves) are sent once, so k claims cost far fewer hashes than k separate paths.
+    Raises IndexError / ValueError on bad indices."""
+    claims = real_claims(rec)
+    if not isinstance(indices, list) or not indices or len(indices) > MAX_MULTI: raise ValueError("indices must be a non-empty list")
+    if any(not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < len(claims) for i in indices): raise IndexError("claim index out of range")
+    if len(set(indices)) != len(indices): raise ValueError("duplicate index")
+    idx = sorted(indices); rid = rec.get("receipt_id"); lv = _levels(_leaves(rec)); proof = []
+    def sib(level, j):
+        proof.append(lv[level][j]); return lv[level][j]
+    root = _multi_walk(len(claims), {i: lv[0][i] for i in idx}, sib)
+    return {"receipt_id": rid, "digest": rec.get("digest"), "leaf_count": len(claims), "indices": idx,
+            "claims": [public_claim(claims[i]) for i in idx], "salts": [leaf_salt(rid, i, claims[i]) for i in idx],
+            "proof": proof, "claims_root": root, "scheme": "pov-r/claim-multiproof/1"}
+
+def verify_multi(m, expected_root=None, expected_leaf_count=None):
+    """Verify a multiproof. Indices must be strictly ascending (canonical, no duplicates), every proof hash is
+    consumed exactly once in replay order, and the recomputed root must equal expected_root (trusted, from the
+    proof card) or the embedded root (flagged untrusted). The tree shape does not always pin leaf_count (e.g. 7 vs
+    8 leaves can replay identically), so pass expected_leaf_count from the proof card's tally to make a
+    "k of N claims" statement trustworthy; otherwise it is flagged embedded(untrusted).
+    Returns {ok, reason, root, count, leaf_count, leaf_count_source}; never raises."""
+    try:
+        if not isinstance(m, dict): return {"ok": False, "reason": "multiproof must be an object"}
+        n, idx, cls, salts, proof = m.get("leaf_count"), m.get("indices"), m.get("claims"), m.get("salts"), m.get("proof")
+        if not isinstance(n, int) or isinstance(n, bool) or n < 1: return {"ok": False, "reason": "bad leaf_count"}
+        if expected_leaf_count is not None and n != expected_leaf_count: return {"ok": False, "reason": "leaf_count mismatch"}
+        if not isinstance(idx, list) or not idx or len(idx) > MAX_MULTI: return {"ok": False, "reason": "bad indices"}
+        if any(not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < n for i in idx): return {"ok": False, "reason": "bad indices"}
+        if any(b <= a for a, b in zip(idx, idx[1:])): return {"ok": False, "reason": "indices must be strictly ascending"}
+        if not isinstance(cls, list) or not isinstance(salts, list) or not len(cls) == len(salts) == len(idx):
+            return {"ok": False, "reason": "claims/salts must match indices"}
+        if any(not isinstance(c, dict) for c in cls) or any(not _hex64(s) for s in salts): return {"ok": False, "reason": "bad claim or salt"}
+        if not isinstance(proof, list) or len(proof) > MAX_PATH * len(idx) or any(not _hex64(p) for p in proof):
+            return {"ok": False, "reason": "bad proof"}
+        it = iter(proof); short = []
+        def sib(level, j):
+            v = next(it, None)
+            if v is None: short.append(1); return "0" * 64
+            return v
+        h = _multi_walk(n, {i: leaf_hash(s, public_claim(c)) for i, s, c in zip(idx, salts, cls)}, sib)
+        if short: return {"ok": False, "reason": "proof too short"}
+        if next(it, None) is not None: return {"ok": False, "reason": "proof too long"}
+        root = expected_root if expected_root is not None else m.get("claims_root")
+        if not _hex64(root): return {"ok": False, "reason": "bad root"}
+        ok = h == root
+        return {"ok": ok, "reason": None if ok else "root mismatch", "root": h, "count": len(idx), "leaf_count": n,
+                "leaf_count_source": "expected" if expected_leaf_count is not None else "embedded(untrusted)",
+                "root_source": "expected" if expected_root is not None else "embedded(untrusted)"}
+    except Exception as e:
+        return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
