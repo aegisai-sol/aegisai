@@ -32,3 +32,5 @@ curl -XPOST localhost:8787/v1/consensus -d '{"url":"https://example.com/","claim
 No secrets, no keypairs, no Solana submit in the image. Data lives in the `/data` volume.
 
 **Coordinator ops:** `AEGIS_RATE_LIMIT=N/SEC` (e.g. `30/60`, per-IP on `/v1/verify` + `/v1/fee-preview`, off by default) · `AEGIS_CORS_ORIGINS=https://a,https://b` (default `*`) · spec at `GET /v1/openapi.json` · counters at `GET /v1/metrics`.
+
+**Verify-then-Act:** `POST /v1/gate {"action":"publish","claim":"..."}` (or `claim_digest`) → `ALLOW` / `DENY` / `REQUIRE_RECEIPT` from the local receipt store (non-flagged, digest-intact receipts only). Read-only, no signing.

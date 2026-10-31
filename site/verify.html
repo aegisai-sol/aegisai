@@ -57,6 +57,22 @@ async function render() {
 $('dcopy').onclick = async () => { try { await navigator.clipboard.writeText($('dg').textContent); $('dcopy').textContent = 'Copied ✓'; } catch (e) { $('dcopy').textContent = 'Copy failed'; } setTimeout(() => $('dcopy').textContent = 'Copy', 1500); };
 document.querySelectorAll('[data-sc]').forEach(b => b.onclick = () => { cur = b.dataset.sc; render(); }); $('canfail').onchange = render; render();
 </script>
+<section id="verify-then-act" class="max-w-3xl mx-auto px-4 pb-10"><h2 class="text-xl font-bold">Verify-then-Act gate <span class="text-xs text-gold align-middle">DEMO</span></h2>
+<p class="text-slate-300 text-sm mt-1">Before an agent acts (publish, post, cite, trade…), it asks <code>POST /v1/gate</code> with the claim. Answer: <b class="text-emerald-400">ALLOW</b> (valid receipt supports it), <b class="text-rose-400">DENY</b> (contradicted or tampered receipt), <b class="text-gold">REQUIRE_RECEIPT</b> (verify first). Demo store below holds one receipt.</p>
+<div class="card p-5 mt-3 text-sm"><div class="flex flex-wrap gap-2"><input id="gc" class="flex-1 min-w-[14rem] rounded-lg bg-deep/60 border border-cyan/20 px-3 py-1.5" value="Water boils at 100 C at sea level."><button id="gb" class="px-3 py-1.5 rounded-full border border-cyan/40 text-cyan">Gate: publish</button><button id="gd" class="px-3 py-1.5 rounded-full border border-gold/40 text-gold">Download demo receipt JSON</button></div>
+<div class="mt-2 text-xs text-slate-400">Try: “Water boils at 100 C at sea level.” · “The Moon is made of cheese.” · anything else</div><div class="mt-3">Decision: <b id="gr" class="font-mono"></b> <span id="gw" class="text-xs text-slate-400"></span></div><code id="gh" class="block font-mono text-xs break-all mt-1 text-slate-400"></code></div>
+<p class="text-xs text-slate-500 mt-2">Mirrors <code>gate.py</code>: claim digest = SHA-256 of normalized claim text. Advisory, read-only — no signing, no token.</p></section>
+<script type="module">
+const $ = id => document.getElementById(id);
+const RECEIPT = { receipt_id: 'demo0001', client_id: 'demo', flagged: false, credits_awarded: 1, claims: [ { text: 'Water boils at 100 C at sea level.', vote: 'TRUE' }, { text: 'The Moon is made of cheese.', vote: 'FALSE' } ], note: 'Demo receipt (off-chain, no token).' };
+const norm = t => t.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.!?;: ]+$/, '');
+const sha = async t => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))].map(b => b.toString(16).padStart(2, '0')).join('');
+$('gb').onclick = async () => { try { const d = await sha(norm($('gc').value)); let dec = 'REQUIRE_RECEIPT', why = 'no receipt covers this claim — run /v1/verify first', col = 'text-gold';
+  for (const c of RECEIPT.claims) if (await sha(norm(c.text)) === d) { if (c.vote === 'TRUE') { dec = 'ALLOW'; why = 'receipt ' + RECEIPT.receipt_id + ' supports it'; col = 'text-emerald-400'; } else if (c.vote === 'FALSE') { dec = 'DENY'; why = 'contradicted by receipt ' + RECEIPT.receipt_id; col = 'text-rose-400'; } }
+  $('gr').textContent = dec; $('gr').className = 'font-mono ' + col; $('gw').textContent = why; $('gh').textContent = 'claim_digest ' + d; } catch (e) { $('gr').textContent = 'needs HTTPS / WebCrypto'; } };
+$('gd').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(RECEIPT, null, 2)], { type: 'application/json' })); a.download = 'aegis-demo-receipt.json'; a.click(); };
+$('gb').click();
+</script>
 <section id="build" class="max-w-6xl mx-auto px-4 pb-12"><div id="tech-progress"><div class="flex flex-wrap justify-between gap-2 items-center"><span class="tp-live"><i></i>Live build tracker</span><span class="text-xs text-slate-400" data-tp="phase"></span></div><h2 class="text-xl md:text-2xl font-bold mt-3">Now building: <span class="grad" data-tp="now">Loading…</span></h2><p class="text-slate-300 text-sm mt-1" data-tp="detail"></p><div class="tp-track"><div class="tp-fill"></div></div><div class="flex justify-between text-xs text-slate-400"><span data-tp="step"></span><span><b class="text-gold" data-tp="pct"></b> · <span data-tp="upd"></span></span></div><ul class="tp-steps"></ul></div></section>
 
 <script src="js/tech-progress.js" defer></script>

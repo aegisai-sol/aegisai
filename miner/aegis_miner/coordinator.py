@@ -48,6 +48,7 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
            "paths": {p: {m: {"summary": d, "responses": {"200": {"description": "OK"}, **({"429": {"description": "Rate limited (Retry-After header)"}} if p in RATE_LIMITED else {})}}}
                      for p, m, d in (("/v1/verify", "post", "Verify a claim against an HTTPS source; returns signed receipt"),
                                      ("/v1/fee-preview", "post", "Preview 70/20/5/5 fee split"),
+                                     ("/v1/gate", "post", "Verify-then-Act: ALLOW/DENY/REQUIRE_RECEIPT for {action, claim|claim_digest}"),
                                      ("/v1/fetch-check", "post", "Fetch-only source check"),
                                      ("/v1/consensus", "post", "Multi-node quorum verify"),
                                      ("/v1/health", "get", "Coordinator health"), ("/v1/peers/ping", "get", "Probe peer liveness (ids only, no URLs)"),
@@ -116,6 +117,12 @@ class H(BaseHTTPRequestHandler):
             if not ok: METRICS["rate_limit_hits"] += 1; return self._send(429, {"error": "rate limited", "retry_after": retry}, (("Retry-After", str(retry)),))
         if self.path == "/v1/verify": METRICS["verify_count"] += 1; return self._verify()
         if self.path == "/v1/fee-preview": METRICS["fee_preview_count"] += 1; return self._fee_preview()
+        if self.path == "/v1/gate":
+            from . import gate
+            try:
+                b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                return self._send(200, gate.decide(b.get("action"), RECEIPTS, b.get("claim"), b.get("claim_digest")))
+            except Exception as e: return self._send(400, {"error": str(e)[:200]})
         if self.path in ("/v1/fetch-check", "/v1/consensus"):
             from . import verify as _v, consensus as _c
             try: b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)))); url, claim = b["url"], b.get("claim", "")

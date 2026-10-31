@@ -1,6 +1,6 @@
 {
   "project": "AegisAI PoV-R",
-  "updated_at": "2026-10-31T04:06:52+02:00",
+  "updated_at": "2026-10-31T04:20:00+02:00",
   "milestones": [
     {
       "id": "decompose",
@@ -139,6 +139,14 @@
       "detail": "Timeouts, latency, last_ok; no peer URLs leaked; 96deefd"
     },
     {
+      "id": "verify-then-act",
+      "title": "Verify-then-Act gate (POST /v1/gate)",
+      "status": "done",
+      "updated_at": "2026-10-31T04:20:00+02:00",
+      "note": "ALLOW/DENY/REQUIRE_RECEIPT from local receipt store; tamper-checked",
+      "detail": "aegis_miner/gate.py + verify.html#verify-then-act demo"
+    },
+    {
       "id": "mint-reservoir",
       "title": "AGIS mint + Reservoir on-chain",
       "status": "blocked",
@@ -152,9 +160,9 @@
   "counts": {
     "active": 1,
     "blocked": 1,
-    "done": 15,
+    "done": 16,
     "next": 0,
-    "total": 17
+    "total": 18
   },
   "active_progress": 80
 }
