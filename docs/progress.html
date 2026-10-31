@@ -1,0 +1,14 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AegisAI · Tech progress</title><link rel="icon" href="assets/agis-logo.png">
+<style>body{margin:0;font:15px system-ui;color:#e2e8f0;background:radial-gradient(ellipse at top,#10264a 0,#060e1c 60%);min-height:100vh}main{max-width:760px;margin:auto;padding:40px 16px}a{color:#22d3ee}
+.bar{height:14px;border-radius:9px;background:#0a1628;border:1px solid #22d3ee33;overflow:hidden}.fill{height:100%;width:0;background:linear-gradient(90deg,#22d3ee,#f5c451);transition:width 1.6s cubic-bezier(.2,.8,.2,1)}
+.m{display:flex;gap:12px;padding:14px;margin:10px 0;border-radius:12px;background:#10264a8c;border:1px solid #22d3ee22}.dot{width:12px;height:12px;border-radius:50%;margin-top:5px;flex:none}
+.done .dot{background:#34d399}.active .dot{background:#f5c451;animation:p 1.4s infinite}.next .dot{background:#475569}@keyframes p{50%{box-shadow:0 0 0 8px #f5c45100;opacity:.6}0%{box-shadow:0 0 0 0 #f5c451aa}}
+.s{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8}.n{font-size:13px;color:#94a3b8;margin-top:3px}</style></head><body><main>
+<a href="index.html">← AegisAI</a><h1>What we are building right now</h1><p class="n">Live feed from <code>tech-progress.json</code>. <a href="verify.html">Try the verifier</a>.</p>
+<div class="bar"><div class="fill" id="f"></div></div><p class="n" id="pct"></p><div id="l"></div></main>
+<script>
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+fetch('tech-progress.json',{cache:'no-store'}).then(r=>r.json()).then(d=>{const m=d.milestones,w={done:1,active:.5,next:0},p=Math.round(100*m.reduce((a,x)=>a+w[x.status],0)/m.length);
+requestAnimationFrame(()=>document.getElementById('f').style.width=p+'%');document.getElementById('pct').textContent=p+'% of current roadmap · updated '+new Date(d.updated_at).toLocaleString();
+document.getElementById('l').innerHTML=m.map(x=>`<div class="m ${x.status}"><span class="dot"></span><div><div class="s">${x.status}</div><b>${esc(x.title)}</b><div class="n">${esc(x.note)}</div></div></div>`).join('')});
+</script></body></html>

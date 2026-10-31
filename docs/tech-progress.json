@@ -1,0 +1,168 @@
+{
+  "project": "AegisAI PoV-R",
+  "updated_at": "2026-10-31T04:20:00+02:00",
+  "milestones": [
+    {
+      "id": "decompose",
+      "title": "Micro-claim decomposition (lists, sentences, URL-safe)",
+      "status": "done",
+      "updated_at": "2026-10-25T12:00:00+02:00",
+      "note": "aegis_miner/verify.py split_sentences + decompose",
+      "detail": "aegis_miner/verify.py split_sentences + decompose"
+    },
+    {
+      "id": "arith",
+      "title": "Exact arithmetic checker",
+      "status": "done",
+      "updated_at": "2026-10-25T12:00:00+02:00",
+      "note": "Deterministic, conf 0.99",
+      "detail": "Deterministic, conf 0.99"
+    },
+    {
+      "id": "verify-api",
+      "title": "Coordinator POST /v1/verify + receipts",
+      "status": "done",
+      "updated_at": "2026-10-27T12:00:00+02:00",
+      "note": "Receipt per request, GET /v1/receipts/<id>",
+      "detail": "Receipt per request, GET /v1/receipts/<id>"
+    },
+    {
+      "id": "credits",
+      "title": "Non-transferable Proof Credits",
+      "status": "done",
+      "updated_at": "2026-10-27T12:00:00+02:00",
+      "note": "Awarded only for confident votes",
+      "detail": "Awarded only for confident votes"
+    },
+    {
+      "id": "canaries",
+      "title": "Calibration canaries",
+      "status": "done",
+      "updated_at": "2026-10-28T12:00:00+02:00",
+      "note": "Failed canary = flagged receipt, 0 credits",
+      "detail": "Failed canary = flagged receipt, 0 credits"
+    },
+    {
+      "id": "quote-match",
+      "title": "Cited quote match on source page",
+      "status": "done",
+      "updated_at": "2026-10-28T12:00:00+02:00",
+      "note": "Exact normalized match + SHA-256 page hash",
+      "detail": "Exact normalized match + SHA-256 page hash"
+    },
+    {
+      "id": "browser-demo",
+      "title": "Browser verify demo (verify.html)",
+      "status": "done",
+      "updated_at": "2026-10-31T03:30:00+02:00",
+      "note": "Live client against verify API + PoV demo video",
+      "detail": "Live client against verify API + PoV demo video"
+    },
+    {
+      "id": "pos-support",
+      "title": "Proof-of-Source: claim support check vs cited page",
+      "status": "done",
+      "updated_at": "2026-10-31T03:50:00+02:00",
+      "note": "Fetch + fingerprint + best-passage support, number contradiction, near-quote, SSRF guard",
+      "commit": "4a3dd97",
+      "detail": "Fetch + fingerprint + best-passage support, number contradiction, near-quote, SSRF guard"
+    },
+    {
+      "id": "semantic",
+      "title": "Meaning-v1 support scorer (negation, paraphrase, antonym contradiction)",
+      "status": "done",
+      "updated_at": "2026-10-31T03:50:00+02:00",
+      "note": "Shipped 377b0ae: stemming + synonym concepts, negation parity, antonym flip -> CONTRADICTED; 13/13 tests",
+      "commit": "377b0ae",
+      "detail": "Shipped 377b0ae: stemming + synonym concepts, negation parity, antonym flip -> CONTRADICTED; 13/13 tests"
+    },
+    {
+      "id": "token-bridge",
+      "title": "Token bridge: receipt digest, claim quote, unsigned claim intent",
+      "status": "done",
+      "updated_at": "2026-10-31T03:30:00+02:00",
+      "commit": "ec4e709",
+      "note": "/v1/claim-quote + /v1/token-state; off-chain mode, no keys held",
+      "detail": "/v1/claim-quote + /v1/token-state; off-chain mode, no keys held"
+    },
+    {
+      "id": "multi-fetch",
+      "title": "Multi-node fetch consensus (independent miners agree on hash)",
+      "status": "done",
+      "updated_at": "2026-10-31T03:49:25+02:00",
+      "note": "N nodes re-fetch cited URL; VALID when >=2 hashes/verdicts agree",
+      "detail": "N nodes re-fetch cited URL; VALID when >=2 hashes/verdicts agree",
+      "commit": "b2939e8"
+    },
+    {
+      "id": "embeddings",
+      "title": "Optional local embedding/NLI scorer",
+      "status": "done",
+      "updated_at": "2026-10-31T03:49:25+02:00",
+      "note": "Pluggable embed scorer: MiniLM if AEGIS_EMBED=1, else deterministic hash-BoW",
+      "detail": "Pluggable embed scorer: MiniLM if AEGIS_EMBED=1, else deterministic hash-BoW",
+      "commit": "b2939e8"
+    },
+    {
+      "id": "devnet-memo",
+      "title": "Receipt hash anchored on Solana devnet",
+      "status": "active",
+      "updated_at": "2026-10-31T03:52:24+02:00",
+      "note": "Signed memo tx + mocked RPC CI + dry-run shipped; mainnet refused. Left: one live devnet TX with faucet SOL",
+      "detail": "Signed memo tx + mocked RPC CI + dry-run shipped; mainnet refused. Left: one live devnet TX with faucet SOL"
+    },
+    {
+      "id": "reservoir-fees",
+      "title": "Reservoir fee accounting (off-chain ledger)",
+      "status": "done",
+      "updated_at": "2026-10-31T03:52:23+02:00",
+      "note": "70% miners / 20% reservoir / 5% treasury / 5% burn, integer-exact, flagged -> reservoir. No token",
+      "commit": "bfa63c8",
+      "detail": "70% miners / 20% reservoir / 5% treasury / 5% burn, integer-exact, flagged -> reservoir. No token"
+    },
+    {
+      "id": "canaries-v2",
+      "title": "Canaries v2: FALSE traps (2 per verify)",
+      "status": "done",
+      "updated_at": "2026-10-31T04:06:52+02:00",
+      "note": "CANARY_POOL_V2 + make_canaries(n=2); always-TRUE miner caught; 96deefd",
+      "commit": "96deefd",
+      "detail": "CANARY_POOL_V2 + make_canaries(n=2); always-TRUE miner caught; 96deefd"
+    },
+    {
+      "id": "peer-liveness",
+      "title": "Peer handshake /v1/peers/ping + health.peer_liveness",
+      "status": "done",
+      "updated_at": "2026-10-31T04:06:52+02:00",
+      "note": "Timeouts, latency, last_ok; no peer URLs leaked; 96deefd",
+      "commit": "96deefd",
+      "detail": "Timeouts, latency, last_ok; no peer URLs leaked; 96deefd"
+    },
+    {
+      "id": "verify-then-act",
+      "title": "Verify-then-Act gate (POST /v1/gate)",
+      "status": "done",
+      "updated_at": "2026-10-31T04:20:00+02:00",
+      "note": "ALLOW/DENY/REQUIRE_RECEIPT from local receipt store; tamper-checked",
+      "detail": "aegis_miner/gate.py + verify.html#verify-then-act demo"
+    },
+    {
+      "id": "mint-reservoir",
+      "title": "AGIS mint + Reservoir on-chain",
+      "status": "blocked",
+      "updated_at": "2026-10-31T03:50:00+02:00",
+      "note": "Option A: blocked until LP funding + audit. No mint now",
+      "detail": "Option A: blocked until LP funding + audit. No mint now"
+    }
+  ],
+  "now": "Now building: devnet receipt anchor",
+  "now_detail": "Signed SPL Memo tx tested in CI (mock RPC). Left: first live devnet TX",
+  "counts": {
+    "active": 1,
+    "blocked": 1,
+    "done": 16,
+    "next": 0,
+    "total": 18
+  },
+  "active_progress": 80
+}

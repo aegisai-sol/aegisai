@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AegisAI ($AGIS) — Proof-of-Verification on Solana</title>
+<meta name="description" content="AegisAI is a decentralized network that fact-checks AI output. Any machine can earn $AGIS by running useful AI micro-verification tasks.">
+<link rel="icon" href="assets/agis-logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="preloader" aria-hidden="true">
+  <div class="shield-loader">
+    <svg viewBox="0 0 100 120" width="84" height="100"><path class="shield-path" d="M50 5 L92 20 V58 C92 86 72 106 50 115 C28 106 8 86 8 58 V20 Z"/><path class="check" d="M30 60 L45 75 L72 44"/></svg>
+    <span class="pulse"></span>
+  </div>
+  <p class="mono">verifying…</p>
+</div>
+
+<header class="nav">
+  <a href="#top" class="brand"><img src="assets/agis-logo.png" alt="AegisAI logo" class="logo" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='assets/agis-logo.jpg'}else{this.style.display='none'}"><span>Aegis<b>AI</b></span></a>
+  <nav id="menu">
+    <a href="#what">About</a><a href="#how">How it works</a><a href="#utility">Utility</a><a href="#tokenomics">Tokenomics</a><a href="#roadmap">Roadmap</a>
+  </nav>
+  <button class="btn btn-sm connect" type="button">Connect Phantom</button>
+  <button class="burger" aria-label="Menu" onclick="document.getElementById('menu').classList.toggle('open')">☰</button>
+</header>
+
+<main id="top">
+<section class="hero">
+  <div class="glow"></div>
+  <span class="tag mono">Solana · SPL · Proof-of-Verification</span>
+  <h1>The shield for <span class="grad">AI truth</span>.</h1>
+  <p class="lead">AegisAI is a decentralized network that fact-checks AI output. Instead of burning power on meaningless hashes, any machine — even old, weak ones — earns <b class="gold">$AGIS</b> by running useful AI micro-verification tasks.</p>
+  <div class="cta">
+    <button class="btn connect" type="button">Connect Phantom</button>
+    <a class="btn btn-ghost" href="#how">How it works</a>
+  </div>
+  <div class="ca mono"><span>CA:</span> <code id="ca">TBD — announced at launch</code> <button class="copy" type="button" onclick="copyCA()">copy</button></div>
+</section>
+
+<section id="what" class="grid2">
+  <div class="card"><h2>What</h2><p>A permissionless verification layer for AI. Claims produced by language models are split into small, checkable units and distributed to a network of independent nodes. Their combined judgment becomes a verifiable, on-chain fact record.</p></div>
+  <div class="card"><h2>Why</h2><p>AI hallucinates — confidently. Traditional mining wastes energy on puzzles with no value. AegisAI redirects compute toward something the world actually needs: trustworthy AI answers, rewarded fairly, accessible to hardware that would otherwise sit idle.</p></div>
+</section>
+
+<section id="how">
+  <h2 class="center">How it works</h2>
+  <div class="steps">
+    <div class="step"><span class="num mono">01</span><h3>Micro-tasks</h3><p>AI output is broken into atomic claims and dispatched as lightweight verification jobs any CPU can handle.</p></div>
+    <div class="step"><span class="num mono">02</span><h3>Consensus</h3><p>Multiple independent nodes check each claim. Agreement is weighted by reputation; dishonest nodes lose standing.</p></div>
+    <div class="step"><span class="num mono">03</span><h3>On-chain fact</h3><p>The verdict is anchored on Solana as a compact, auditable proof. Verifiers are rewarded in $AGIS.</p></div>
+  </div>
+  <pre class="code mono"><span class="c">// Proof-of-Verification (concept)</span>
+claim   = split(ai_output)
+votes   = nodes.verify(claim)        <span class="c">// k-of-n</span>
+verdict = consensus(votes, reputation)
+solana.anchor(hash(claim), verdict)  <span class="c">// → reward $AGIS</span></pre>
+</section>
+
+<section id="utility">
+  <h2 class="center">Utility</h2>
+  <div class="grid3">
+    <div class="card"><h3>Earn by verifying</h3><p>Run the AegisAI client and get rewarded for honest, useful work.</p></div>
+    <div class="card"><h3>Pay for verification</h3><p>Apps and agents spend $AGIS to have AI answers checked via API.</p></div>
+    <div class="card"><h3>Reputation & staking</h3><p>Stake to signal reliability and access higher-value tasks (planned).</p></div>
+  </div>
+</section>
+
+<section id="tokenomics">
+  <h2 class="center">Tokenomics <span class="badge mono">draft</span></h2>
+  <div class="grid2">
+    <div class="card stats">
+      <div><span class="mono label">Total supply</span><strong>1,000,000,000 $AGIS</strong></div>
+      <div><span class="mono label">Chain</span><strong>Solana (SPL)</strong></div>
+      <div><span class="mono label">Mint authority</span><strong>Revoked after launch</strong></div>
+      <div><span class="mono label">Launch</span><strong>Fair launch on pump.fun</strong></div>
+    </div>
+    <div class="card"><h3>Fair & transparent</h3><p>No presale and no hidden allocations. The team is funded through creator fees and a transparent, publicly disclosed first buy. Any further allocation will be announced openly before launch.</p><p class="muted">This draft may change before launch.</p></div>
+  </div>
+</section>
+
+<section id="roadmap">
+  <h2 class="center">Roadmap</h2>
+  <ol class="timeline">
+    <li><span class="mono">Phase 1</span><h3>MVP client</h3><p>Lightweight verifier for desktops and older hardware; testnet tasks.</p></li>
+    <li><span class="mono">Phase 2</span><h3>Mainnet verification</h3><p>Verdicts anchored on Solana mainnet; rewards live.</p></li>
+    <li><span class="mono">Phase 3</span><h3>Verification API</h3><p>Paid verification for apps, agents and enterprises.</p></li>
+    <li><span class="mono">Phase 4</span><h3>CEX listings</h3><p>Pursued later, once real usage and volume exist.</p></li>
+  </ol>
+</section>
+
+<section class="final">
+  <h2>Join the shield.</h2>
+  <p>Connect your Phantom wallet when the network opens.</p>
+  <button class="btn connect" type="button">Connect Phantom</button>
+</section>
+</main>
+
+<footer>
+  <p><b>Not financial advice.</b> $AGIS is an experimental utility token. Crypto assets are highly volatile and you may lose everything you put in. Do your own research. Never share your seed phrase or private keys — AegisAI will never ask for them.</p>
+  <p class="muted mono">© 2026 AegisAI · Built on Solana</p>
+</footer>
+<div id="toast" role="status"></div>
+<script>
+window.addEventListener('load',()=>setTimeout(()=>document.getElementById('preloader').classList.add('done'),700));
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200)}
+document.querySelectorAll('.connect').forEach(b=>b.onclick=()=>toast('Phantom connect — coming soon'));
+function copyCA(){const v=document.getElementById('ca').textContent;if(v.startsWith('TBD'))return toast('Contract address not yet announced');navigator.clipboard.writeText(v);toast('Copied')}
+document.querySelectorAll('#menu a').forEach(a=>a.onclick=()=>document.getElementById('menu').classList.remove('open'));
+</script>
+</body>
+</html>
