@@ -343,22 +343,26 @@ def build_nodes(peer_endpoints, health=None, quorum=2, node_factory=None):
     skipped = [f"peer{i}" for i, e in enumerate(peers) if e not in alive]
     return nodes, {"mode": "peers", "known": len(peers), "alive": len(alive), "skipped": skipped}
 
-def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node_factory=None, weighted=False,
+def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=None, node_factory=None, weighted=False,
                     min_strength=None, tracker=None, agreement_threshold=None):
     """Consensus over alive peers; too few alive -> NO_CONSENSUS with reason (no exception).
-    Passive health: a peer that errors during collection counts as a failed observation."""
+    Passive health: a peer that errors during collection counts as a failed observation.
+    quorum None -> AEGIS_QUORUM (default 2); audited as quorum_applied {value, source}."""
     health = health or PEER_HEALTH
+    q_applied = {"value": env_quorum() if quorum is None else quorum, "source": "env" if quorum is None else "request"}
+    quorum = q_applied["value"]
     nodes, info = build_nodes(peer_endpoints, health, quorum, node_factory)
     if len(nodes) < quorum:
         return {"url": url, "claim": claim_text, "quorum": quorum, "nodes": len(nodes), "status": "NO_CONSENSUS",
                 "valid": False, "reason": "insufficient_alive_peers", "consensus_hash": None, "consensus_vote": None,
-                "per_node": [], "peer_selection": info}
+                "per_node": [], "peer_selection": info, "quorum_applied": q_applied}
     _p = [p.strip() for p in peer_endpoints if p and p.strip()]
     w = None
     if weighted and _p:  # local self node = 1.0; peers by uptime streak (see PeerHealth.weight)
         w = dict(health.weights(_p, agreement_threshold)); w.setdefault("self", 1.0)
     ms = env_min_strength() if min_strength is None else min_strength
     rec = consensus(url, claim_text, nodes, quorum=quorum, weights=w, min_strength=ms)
+    rec["quorum_applied"] = q_applied
     rec["min_strength_applied"] = {"value": ms, "source": "env" if min_strength is None else "request"}
     rec["agreement_threshold_applied"] = {"value": health.agreement_threshold if agreement_threshold is None else agreement_threshold,
                                           "source": "env" if agreement_threshold is None else "request"}
@@ -397,6 +401,26 @@ def resolve_agreement_threshold(body_value):
             or not 0.0 <= body_value <= 1.0:
         raise ValueError("agreement_threshold must be a number in [0,1]")
     return float(body_value)
+
+QUORUM_MIN, QUORUM_MAX = 2, 16
+
+def env_quorum(env=None):
+    """AEGIS_QUORUM int in [2,16]; unset/invalid/<2 -> 2; >16 -> 16."""
+    import os
+    env = os.environ if env is None else env
+    try: v = int(str(env.get("AEGIS_QUORUM", QUORUM_MIN)).strip())
+    except ValueError: return QUORUM_MIN
+    return QUORUM_MIN if v < QUORUM_MIN else min(v, QUORUM_MAX)
+
+def resolve_quorum(body_value, env=None):
+    """Per-request quorum: None -> env default (returns None); else JSON int (not bool/float) in [2,16]
+    and >= env quorum (a request may only TIGHTEN the operator floor, never weaken it)."""
+    if body_value is None: return None
+    if isinstance(body_value, bool) or not isinstance(body_value, int) or not QUORUM_MIN <= body_value <= QUORUM_MAX:
+        raise ValueError(f"quorum must be an integer in [{QUORUM_MIN},{QUORUM_MAX}]")
+    floor = env_quorum(env)
+    if body_value < floor: raise ValueError(f"quorum {body_value} below operator floor AEGIS_QUORUM={floor}")
+    return body_value
 
 def resolve_min_strength(body_value):
     """Per-request min_strength: None -> env default (returns None); else finite number in [0,1] (not bool)."""

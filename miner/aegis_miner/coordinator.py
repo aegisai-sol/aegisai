@@ -27,7 +27,7 @@ CLAIM_SCHEMA = 1
 def health():
     """Liveness + config summary. Never exposes peer URLs or keys, only counts."""
     peers = [p for p in os.environ.get("AEGIS_PEERS", "").split(",") if p.strip()]
-    return {"ok": True, "uptime_s": int(time.time() - START), "peers": len(peers), "quorum": 2,
+    return {"ok": True, "uptime_s": int(time.time() - START), "peers": len(peers), "quorum": consensus.env_quorum(),
             "citation_policy": "https-only" if os.environ.get("AEGIS_ALLOW_HTTP") != "1" else "http-allowed(dev)",
             "max_redirects": verify.MAX_REDIRECTS, "anchor": "devnet" if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" else "off",
             "token_mode": token_bridge.state_from_env().mode,
@@ -124,7 +124,7 @@ class H(BaseHTTPRequestHandler):
             peers = [p for p in os.environ.get("AEGIS_PEERS", "").split(",") if p.strip()]
             res = consensus.PEER_HEALTH.observe_pings(peers, consensus.ping_peers(peers, expect=(PROTOCOL_VERSION, CLAIM_SCHEMA)))
             consensus.attach_breakdowns(consensus.PEER_HEALTH, peers, res)
-            self._send(200, {"peers": res, "quorum": 2, **consensus.ping_flags()})
+            self._send(200, {"peers": res, "quorum": consensus.env_quorum(), **consensus.ping_flags()})
         elif self.path == "/v1/openapi.json": self._send(200, OPENAPI)
         elif self.path == "/v1/metrics": self._send(200, dict(METRICS))
         elif self.path == "/api/votes": self._send(200, VOTES[-100:])
@@ -153,7 +153,8 @@ class H(BaseHTTPRequestHandler):
             except Exception: return self._send(400, {"error": "need {url, claim}"})
             try:
                 if self.path == "/v1/fetch-check": return self._send(200, _v.check_url_only(url, claim_text=claim))
-                return self._send(200, _c.consensus_alive(url, claim, os.environ.get("AEGIS_PEERS", "").split(","), quorum=2,
+                return self._send(200, _c.consensus_alive(url, claim, os.environ.get("AEGIS_PEERS", "").split(","),
+                                                          quorum=_c.resolve_quorum(b.get("quorum")),
                                                           weighted=_c.resolve_weighted(b.get("weighted")),
                                                           min_strength=_c.resolve_min_strength(b.get("min_strength")),
                                                           agreement_threshold=_c.resolve_agreement_threshold(b.get("agreement_threshold"))))

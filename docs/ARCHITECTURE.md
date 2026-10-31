@@ -54,6 +54,7 @@ Horizontal coordinators sharded by task id; attestation batched; read-heavy dash
 - `AEGIS_AGREEMENT_MIN_VOTES` — sample-size guard; penalty only applies once the window holds >= N votes (default 5).
 - `AEGIS_WEIGHT_FLOOR` — minimum weight for an *alive* peer, float in [0,1] (default 0 = off; >1 clamps to 1; invalid → 0). Dead peers stay 0. Breakdown reports `floored: true` when applied.
 - `AEGIS_MIN_STRENGTH` — float in [0,1] (default 0 = off; >1 clamps to 1; invalid → 0). A VALID/VALID_VERDICT round with `quorum_strength` below it is downgraded to `NO_CONSENSUS` (`reason: low_strength`, `downgraded_from`), and the receipt digest reflects the downgrade.
+- `AEGIS_QUORUM` — min distinct agreeing nodes for `/v1/consensus` (default 2, clamp 2..16; invalid/<2 → 2); reported in `/v1/health` and `/v1/peers/ping`. Per-request JSON int `quorum` may only *tighten* it (int in [2,16] and >= `AEGIS_QUORUM`; bool/float/lower → 400). Records carry `quorum_applied` {value, source: env|request}, also on `insufficient_alive_peers`.
 - `AEGIS_STRENGTH_WINDOW` — rolling window of recent rounds for `/v1/health.quorum_strength` {latest, avg, min, samples, window, rounds, downgraded, min_strength} (default 20, clamp 1..1000; strengths only, no URLs/claims).
 
 `/v1/health` exposes `peer_weights` ({peerN: {bonus, fade, dissent, weight, alive, floored}}, ids only, same shape as `/v1/peers/ping`). Weighted `/v1/consensus` records include `weights_used` (ids-only snapshot before the round's health updates) for audit.
