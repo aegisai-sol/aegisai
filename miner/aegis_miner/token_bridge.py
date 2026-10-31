@@ -60,6 +60,24 @@ def audit_receipt(rec, secret=None, store_dir=None):
     return {"receipt_id": rid, "intact": intact, "digest_ok": digest_ok, "mac": mac, "known": known,
             "protocol_version": rec.get("protocol_version")}
 
+def receipt_proof(rec, secret=None, store_dir=None):
+    """Compact shareable proof card for a stored receipt: digest/nonce/schema + vote tally + self-audit.
+    Privacy: no claim texts, evidence, client_id, or MAC value are included (only mac_present)."""
+    if not isinstance(rec, dict) or not isinstance(rec.get("receipt_id"), str):
+        raise ValueError("receipt object with receipt_id required")
+    claims = [c for c in (rec.get("claims") or []) if isinstance(c, dict) and not c.get("canary")]
+    tally = {}
+    for c in claims:
+        v = str(c.get("vote") or "UNSURE").upper(); tally[v] = tally.get(v, 0) + 1
+    cal = rec.get("calibration") if isinstance(rec.get("calibration"), dict) else {}
+    a = audit_receipt(rec, secret=secret, store_dir=store_dir)
+    return {"receipt_id": rec["receipt_id"], "digest": rec.get("digest"), "nonce": rec.get("nonce"),
+            "protocol_version": rec.get("protocol_version"), "claim_schema": rec.get("claim_schema"),
+            "ts": rec.get("ts"), "claim_count": len(claims), "votes": dict(sorted(tally.items())),
+            "calibration_ok": cal.get("ok"), "flagged": bool(rec.get("flagged")), "mac_present": "mac" in rec,
+            "onchain": rec.get("onchain") if isinstance(rec.get("onchain"), dict) else None,
+            "audit": {k: a[k] for k in ("intact", "digest_ok", "mac")}}
+
 AUDIT_BATCH_MAX = 50
 
 def audit_batch(recs, secret=None, store_dir=None, max_items=AUDIT_BATCH_MAX):

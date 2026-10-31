@@ -81,6 +81,7 @@ OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version
                                      ("/v1/health", "get", "Coordinator health"), ("/v1/peers/ping", "get", "Probe peer liveness (ids only, no URLs)"),
                                      ("/v1/receipts", "get", "Paginated receipt summaries (limit, offset, status, since filters)"),
                                      ("/v1/receipts/{id}", "get", "Single receipt"),
+                                     ("/v1/receipts/{id}/proof", "get", "Shareable proof card: digest, nonce, vote tally, self-audit; no claim texts/client_id/MAC"),
                                      ("/v1/receipts/verify", "post", "Audit a presented receipt: digest recompute, HMAC, matches stored copy"),
                                      ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
                                      ("/v1/metrics", "get", "Counters: verify_count, fee_preview_count, rate_limit_hits, body_rejected"),
@@ -140,6 +141,13 @@ class H(BaseHTTPRequestHandler):
                 if not since.isdigit(): return self._send(400, {"error": "since must be a non-negative integer (epoch seconds)"})
                 since = int(since)
             self._send(200, list_receipts(limit, offset, status, since))
+        elif self.path.startswith("/v1/receipts/") and self.path.endswith("/proof"):
+            rid = self.path[len("/v1/receipts/"):-len("/proof")]; f = os.path.join(RECEIPTS, rid + ".json")
+            if not (rid.isalnum() and os.path.exists(f)): return self._send(404, {"error": "receipt not found"})
+            try: rec = json.load(open(f))
+            except Exception: return self._send(500, {"error": "stored receipt unreadable"})
+            try: self._send(200, token_bridge.receipt_proof(rec))
+            except ValueError as e: self._send(500, {"error": str(e)[:200]})
         elif self.path.startswith("/v1/receipts/"):
             rid = os.path.basename(self.path); f = os.path.join(RECEIPTS, rid + ".json")
             if rid.isalnum() and os.path.exists(f): self._send(200, json.load(open(f)))
