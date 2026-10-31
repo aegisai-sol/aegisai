@@ -44,3 +44,11 @@ Open the site → "Add to Home Screen" (PWA) → connect Phantom (mobile in-app 
 
 ## Scaling notes
 Horizontal coordinators sharded by task id; attestation batched; read-heavy dashboard served from cached `/v1/stats` + Solana RPC/indexer (Helius) for holders and txs.
+
+### Weighted quorum env knobs
+- `AEGIS_WEIGHTED_QUORUM` — enable uptime-weighted voting (per-request `weighted` bool overrides).
+- `AEGIS_WEIGHT_HALFLIFE` — idle-fade of uptime bonus, seconds (0 = off).
+- `AEGIS_DISAGREE_CAP` — max halvings for consecutive dissent (default 4, 0 = off, clamp 16).
+- `AEGIS_WEIGHT_FLOOR` — minimum weight for an *alive* peer, float in [0,1] (default 0 = off; >1 clamps to 1; invalid → 0). Dead peers stay 0. Breakdown reports `floored: true` when applied.
+
+`/v1/health` exposes `peer_weights` ({peerN: {bonus, fade, dissent, weight, alive, floored}}, ids only, same shape as `/v1/peers/ping`). Weighted `/v1/consensus` records include `weights_used` (ids-only snapshot before the round's health updates) for audit.
