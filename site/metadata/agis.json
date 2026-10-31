@@ -1,17 +1,20 @@
 {
   "name": "AegisAI",
   "symbol": "AGIS",
-  "description": "AegisAI (AGIS) powers Proof-of-Verification on Solana: AI micro-claims verified by phones, PCs and servers, sealed on-chain. Fixed 1B supply; mint and freeze authority revoked; 15% team vested.",
-  "image": "https://bold-thistle-3z5f.here.now/assets/agis-logo.png",
-  "external_url": "https://bold-thistle-3z5f.here.now/",
+  "description": "AegisAI (AGIS) — Proof-of-Verification on Solana. Light mining: devices verify RWA/AI claims and earn AGIS. Max 10B; 85% mined over time; 10% team (lockable); 5% ecosystem. Freeze revoked; mint kept for mining emissions.",
+  "image": "https://raw.githubusercontent.com/aegisai-sol/aegisai/main/site/assets/agis-logo.png",
+  "external_url": "https://aegisai.xyz",
   "attributes": [
     {"trait_type": "Protocol", "value": "Proof-of-Verification"},
     {"trait_type": "Chain", "value": "Solana"},
-    {"trait_type": "Supply", "value": "1000000000"},
-    {"trait_type": "Decimals", "value": "9"}
+    {"trait_type": "MaxSupply", "value": "10000000000"},
+    {"trait_type": "Decimals", "value": "9"},
+    {"trait_type": "Mine", "value": "85%"},
+    {"trait_type": "Team", "value": "10%"},
+    {"trait_type": "Ecosystem", "value": "5%"}
   ],
   "properties": {
     "category": "fungible",
-    "files": [{"uri": "https://bold-thistle-3z5f.here.now/assets/agis-logo.png", "type": "image/png"}]
+    "files": [{"uri": "https://raw.githubusercontent.com/aegisai-sol/aegisai/main/site/assets/agis-logo.png", "type": "image/png"}]
   }
 }
