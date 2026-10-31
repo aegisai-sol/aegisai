@@ -9,6 +9,10 @@ Human-configured AI bots are allowed. Blocked (fail closed, ValueError, nothing
 recorded): zero useful work, overlapping/replayed slices, one wallet faking
 more devices than MAX_DEVICES_PER_WALLET, slices from the future, bad wallet.
 Optional Ed25519: if a device pubkey was bound, each claim must be signed.
+Daily caps mirror the live claim server: a wallet earns at most
+DAILY_CAP_BASE and the network at most GLOBAL_DAILY_CAP_BASE per UTC day
+(keyed by claim time `now`); an over-cap claim is clipped, and once a cap is
+full the claim fails closed ("daily cap reached") without consuming the slice.
 Integer math only; no RPC, no mint here (on-chain mint is a separate step).
 """
 import json
@@ -19,6 +23,9 @@ DOMAIN = b"AEGIS/mine-claim/v1"
 MAX_POWER = 100            # power_score 1..100 (phone ~1-10, server up to 100)
 MAX_SLICE_SECONDS = 3600   # one claim covers at most 1h online
 MAX_DEVICES_PER_WALLET = 16
+DAY_SECONDS = 86400
+DAILY_CAP_BASE = 100 * me.BASE          # per wallet per UTC day (matches live claim server)
+GLOBAL_DAILY_CAP_BASE = 100_000 * me.BASE  # whole network per UTC day
 B58 = set("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
 
 
@@ -54,8 +61,13 @@ def claim_message(c):
 
 
 class ClaimLedger:
-    def __init__(self, genesis):
+    def __init__(self, genesis, daily_cap=DAILY_CAP_BASE, global_daily_cap=GLOBAL_DAILY_CAP_BASE):
         self.genesis = _int(genesis, "genesis")
+        self.daily_cap = _int(daily_cap, "daily_cap")
+        self.global_daily_cap = _int(global_daily_cap, "global_daily_cap")
+        if self.daily_cap <= 0 or self.global_daily_cap <= 0:
+            raise ValueError("caps must be positive")
+        self.day_used = {}    # (day, wallet|"*") -> base units
         self.devices = {}     # device_id -> (wallet, device_pubkey|None)
         self.last_end = {}    # device_id -> end ts of last slice
         self.balances = {}    # wallet -> base units
@@ -92,9 +104,22 @@ class ClaimLedger:
             except Exception:
                 raise ValueError("bad signature")
         amt = me.reward_for_work(units, now=start, genesis=self.genesis)
+        day, w = now // DAY_SECONDS, c["wallet"]
+        used, gused = self.day_used.get((day, w), 0), self.day_used.get((day, "*"), 0)
+        amt = min(amt, self.daily_cap - used, self.global_daily_cap - gused)
+        if amt <= 0:
+            raise ValueError("daily cap reached")
         if self.total + amt > me.emitted_until(now, self.genesis):
             raise ValueError("exceeds emission schedule")
         self.last_end[did] = start + secs
-        self.balances[c["wallet"]] = self.balances.get(c["wallet"], 0) + amt
+        self.balances[w] = self.balances.get(w, 0) + amt
+        self.day_used[(day, w)] = used + amt
+        self.day_used[(day, "*")] = gused + amt
         self.total += amt
-        return {"scheme": SCHEME, "wallet": c["wallet"], "units": units, "agis_base": amt}
+        return {"scheme": SCHEME, "wallet": w, "units": units, "agis_base": amt}
+
+    def remaining_today(self, wallet, now):
+        """Base units `wallet` can still earn in the UTC day containing `now`."""
+        day = _int(now, "now") // DAY_SECONDS
+        return max(0, min(self.daily_cap - self.day_used.get((day, wallet), 0),
+                          self.global_daily_cap - self.day_used.get((day, "*"), 0)))

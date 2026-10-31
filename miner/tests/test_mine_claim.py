@@ -34,7 +34,7 @@ def test_fail_closed(kw):
     assert l.total == 0
 
 def test_replay_blocked():
-    l = L(); l.claim(C(), now=G + 600)
+    l = mc.ClaimLedger(G, daily_cap=10**30, global_daily_cap=10**30); l.bind(W, "d1"); l.claim(C(), now=G + 600)
     with pytest.raises(ValueError): l.claim(C(), now=G + 600)
     l.claim(C(start=G + 60), now=G + 600)
 
@@ -45,7 +45,7 @@ def test_device_cap_and_steal():
     with pytest.raises(ValueError): l.bind(W2, "d0")
 
 def test_halving_applies():
-    l = L(); E = me.EMISSION_ERA_SECONDS
+    l = mc.ClaimLedger(G, daily_cap=10**30, global_daily_cap=10**30); l.bind(W, "d1"); E = me.EMISSION_ERA_SECONDS
     a = l.claim(C(), now=G + 600)["agis_base"]
     b = l.claim(C(start=G + E), now=G + E + 600)["agis_base"]
     assert b == a // 2 or abs(b * 2 - a) <= 60
@@ -58,3 +58,27 @@ def test_ed25519_optional():
     l = mc.ClaimLedger(G); l.bind(W, "d1", pub)
     with pytest.raises(ValueError): l.claim(C(), now=G + 600, signature=b"x" * 64)
     assert l.claim(C(), now=G + 600, signature=k.sign(mc.claim_message(C())))["agis_base"] > 0
+
+
+def test_daily_wallet_cap_clips_then_blocks():
+    l = L(); D = mc.DAY_SECONDS; now = G + 3 * D  # same UTC day for all claims below
+    r = l.claim(C(start=G + 3 * D - 4000, online_seconds=3600, power_score=100), now=now)
+    assert r["agis_base"] == mc.DAILY_CAP_BASE and l.remaining_today(W, now) == 0
+    with pytest.raises(ValueError, match="daily cap"):
+        l.claim(C(start=G + 3 * D - 300, online_seconds=60), now=now)
+    assert l.balances[W] == mc.DAILY_CAP_BASE and l.last_end["d1"] == G + 3 * D - 400
+    nxt = l.claim(C(start=G + 3 * D - 300, online_seconds=60), now=now + D)  # next day: slice not burned
+    assert nxt["agis_base"] > 0
+
+def test_global_cap_shared_across_wallets():
+    l = mc.ClaimLedger(G, daily_cap=10**30, global_daily_cap=5 * me.BASE)
+    l.bind(W, "d1"); l.bind(W2, "d2"); now = G + 600
+    a = l.claim(C(), now=now)["agis_base"]
+    assert a == 5 * me.BASE
+    with pytest.raises(ValueError, match="daily cap"):
+        l.claim(C(wallet=W2, device_id="d2"), now=now)
+    assert l.remaining_today(W2, now) == 0 and l.total == a
+
+def test_caps_must_be_positive():
+    for kw in (dict(daily_cap=0), dict(global_daily_cap=-1), dict(daily_cap=1.0)):
+        with pytest.raises(ValueError): mc.ClaimLedger(G, **kw)
