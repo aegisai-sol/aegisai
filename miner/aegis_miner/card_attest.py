@@ -49,9 +49,45 @@ def sign_card(card, seed_hex):
     sk = ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex))
     return {**body, "attestation": {"scheme": SCHEME, "pubkey": pubkey_from_seed(seed_hex), "sig": sk.sign(card_message(body)).hex()}}
 
-def verify_card(card, trusted_pubkeys):
+REVOKE_SCHEME = "pov-r/key-revoke/1"
+REVOKE_REASONS = ("compromised", "retired")
+
+def revoke_message(pubkey, reason, revoked_at):
+    core = {"pubkey": pubkey, "reason": reason, "revoked_at": revoked_at}
+    return REVOKE_SCHEME.encode() + b"\n" + json.dumps(core, sort_keys=True, separators=(",", ":")).encode()
+
+def make_revocation(seed_hex, reason, revoked_at):
+    """Self-signed key revocation (like an OpenPGP revocation cert): only the key holder can revoke, so a third party
+    cannot DoS a coordinator by 'revoking' its key, and the statement verifies offline with no registry.
+    reason 'compromised' kills every card from that key (an attacker can backdate ts); 'retired' (planned rotation)
+    keeps cards with ts < revoked_at valid. Raises ValueError on bad input."""
+    ed, _ = _ed()
+    if ed is None: raise ValueError("ed25519 unavailable (install cryptography)")
+    if not _hexn(seed_hex, 64): raise ValueError("bad seed")
+    if reason not in REVOKE_REASONS: raise ValueError("reason must be compromised|retired")
+    if isinstance(revoked_at, bool) or not isinstance(revoked_at, (int, float)) or revoked_at < 0: raise ValueError("bad revoked_at")
+    pk = pubkey_from_seed(seed_hex)
+    sig = ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex)).sign(revoke_message(pk, reason, revoked_at)).hex()
+    return {"scheme": REVOKE_SCHEME, "pubkey": pk, "reason": reason, "revoked_at": revoked_at, "sig": sig}
+
+def check_revocation(rev):
+    """Return (pubkey, reason, revoked_at) for a valid self-signed revocation, else None. Never raises."""
+    try:
+        if not isinstance(rev, dict) or rev.get("scheme") != REVOKE_SCHEME: return None
+        pk, reason, at, sig = rev.get("pubkey"), rev.get("reason"), rev.get("revoked_at"), rev.get("sig")
+        if not _hexn(pk, 64) or not _hexn(sig, 128) or reason not in REVOKE_REASONS: return None
+        if isinstance(at, bool) or not isinstance(at, (int, float)) or at < 0: return None
+        ed, _ = _ed()
+        if ed is None: return None
+        ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(sig), revoke_message(pk, reason, at))
+        return pk, reason, at
+    except Exception:
+        return None
+
+def verify_card(card, trusted_pubkeys, revocations=None):
     """Check a card's attestation against a set of trusted pubkeys (hex). Returns {ok, reason, signer}; never raises.
-    A card signed by a key not in trusted_pubkeys fails: a forger can always sign with their own key."""
+    A card signed by a key not in trusted_pubkeys fails: a forger can always sign with their own key.
+    revocations: self-signed pov-r/key-revoke/1 statements; invalid ones are ignored (cannot revoke what you don't hold)."""
     try:
         if not isinstance(card, dict): return {"ok": False, "reason": "proof card must be an object"}
         keys = {k.lower() for k in (trusted_pubkeys or []) if isinstance(k, str)}
@@ -66,6 +102,13 @@ def verify_card(card, trusted_pubkeys):
         if ed is None: return {"ok": False, "reason": "ed25519 unavailable"}
         try: ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(sig), card_message(card))
         except Exception: return {"ok": False, "reason": "bad signature"}
+        for rv in revocations or []:
+            c = check_revocation(rv)
+            if c is None or c[0] != pk: continue
+            ts = card.get("ts")
+            if c[1] == "compromised": return {"ok": False, "reason": "signer key revoked (compromised)", "signer": pk}
+            if isinstance(ts, bool) or not isinstance(ts, (int, float)) or ts >= c[2]:
+                return {"ok": False, "reason": "signer key retired before card ts", "signer": pk}
         return {"ok": True, "reason": None, "signer": pk}
     except Exception as e:
         return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
