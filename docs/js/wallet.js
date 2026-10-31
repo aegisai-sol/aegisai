@@ -14,9 +14,22 @@ function providers() {
 }
 export const wallet = { pubkey: null, name: null, provider: null };
 window.agisWallet = wallet;
+const CSS = '.agis-wallet-btn{display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid rgba(34,211,238,.25);color:#94a3b8;border-radius:999px;font:500 11.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:6px 11px;max-width:96px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:color .15s,border-color .15s,background .15s}.agis-wallet-btn:hover,.agis-wallet-btn:focus-visible{color:#22d3ee;border-color:rgba(34,211,238,.6);outline:none}.agis-wallet-btn[data-state=connected]{color:#e2e8f0;border-color:rgba(34,211,238,.45);background:rgba(34,211,238,.06);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}@media(min-width:768px){.agis-wallet-btn{max-width:140px;font-size:12px}}';
+function ensureCss() {
+  if (document.getElementById('agis-wallet-css')) return;
+  const s = document.createElement('style'); s.id = 'agis-wallet-css'; s.textContent = CSS; document.head.appendChild(s);
+}
 function render() {
+  ensureCss();
   const n = providers().length;
-  document.querySelectorAll('[data-wallet-btn]').forEach(b => b.textContent = wallet.pubkey ? short(wallet.pubkey) + ' · Disconnect' : (n ? 'Connect Wallet' : 'Install a Solana wallet'));
+  const state = wallet.pubkey ? 'connected' : (n ? 'idle' : 'install');
+  const label = { connected: wallet.pubkey && short(wallet.pubkey), idle: 'Connect', install: 'Get wallet' }[state];
+  const aria = { connected: 'Wallet ' + (wallet.pubkey || '') + ' connected. Tap to disconnect', idle: 'Connect Solana wallet', install: 'Get a Solana wallet (opens Phantom)' }[state];
+  document.querySelectorAll('[data-wallet-btn]').forEach(b => {
+    b.classList.add('agis-wallet-btn');
+    b.classList.remove('bg-cyan', 'text-navy', 'ml-auto');
+    b.textContent = label; b.title = aria; b.setAttribute('aria-label', aria); b.dataset.state = state;
+  });
   document.querySelectorAll('[data-wallet-net]').forEach(e => e.textContent = wallet.pubkey ? wallet.name + ' · Solana mainnet' : 'Phantom · Solflare · Trust · MetaMask');
   document.dispatchEvent(new CustomEvent('agis:wallet', { detail: wallet.pubkey }));
 }
