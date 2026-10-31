@@ -48,3 +48,12 @@ RWA here = **document verification** (not tokenization). The file is SHA-256 fin
 | GET | `/api/rwa/health` | `{rwa:true,jobs,open}` (also in `/api/health`) |
 
 Rate limits per IP: 120 GET / 20 POST per minute. Client: `site/js/rwa-jobs.js` (`window.agisRwa.listJobs / integrityCheck / vote`) — the miner can call it in the next patch. `rwa.html` uses the network when it's reachable and falls back to the local queue. Not built yet: Solana memo receipt, fee burn, CDN storage. Note: Render disk is ephemeral unless a persistent disk is attached.
+
+## RWA seal receipt on Solana (v1)
+"Seal a file" = notarize a real file (invoice, receipt, deed scan, PDF, photo, video, Excel). Not tokenization.
+When a job reaches `verified`/`failed`, the claim server sends one **Solana Memo** tx from the payer (mint-auth) key:
+`AEGIS/rwa/v1|<jobId>|<sha256>|<status>` (program `MemoSq4gqABAXKb96qnH8TuFvNy9CtaxGCzhuB7FF6Q`).
+- Job JSON gets `receiptTx` (signature → Solscan), `receiptAt`, `receiptError`.
+- No keypair or payer SOL < 0.003 → `receiptTx:null` + `receiptError`; the vote still succeeds. Disable with `RWA_MEMO=0`.
+- Only hash + status + time go on chain; file content never does. Private mode sends an AES-GCM ciphertext to miners; public anchor sends the hash only.
+- Cost ≈ 5,000 lamports per seal (base fee).
