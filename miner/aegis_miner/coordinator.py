@@ -132,7 +132,7 @@ class H(BaseHTTPRequestHandler):
             from . import gate
             try:
                 b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-                return self._send(200, gate.decide(b.get("action"), RECEIPTS, b.get("claim"), b.get("claim_digest")))
+                return self._send(200, gate.decide(b.get("action"), RECEIPTS, b.get("claim"), b.get("claim_digest"), nonce=b.get("nonce")))
             except Exception as e: return self._send(400, {"error": str(e)[:200]})
         if self.path in ("/v1/fetch-check", "/v1/consensus"):
             from . import verify as _v, consensus as _c
@@ -153,6 +153,12 @@ class H(BaseHTTPRequestHandler):
         text = (body.get("text") or "").strip()
         if not text or len(text) > 20000: return self._send(400, {"error": "text required (<=20000 chars)"})
         cid = str(body.get("client_id") or "anon")[:64]
+        from . import gate as _g
+        nonce = body.get("nonce")
+        if nonce is not None:
+            if not _g.valid_nonce(nonce): return self._send(400, {"error": "nonce must be 8-128 chars [A-Za-z0-9_-]"})
+            if _g.nonce_owners(RECEIPTS, nonce): return self._send(409, {"error": "nonce already used (replay)"})
+        else: nonce = uuid.uuid4().hex
         rid = uuid.uuid4().hex[:16]
         claims = [dict(c, **verify.check_claim(c)) for c in verify.decompose(text)[:50]]
         claims += [dict(c, **verify.check_claim(c)) for c in verify.make_canaries(rid, 2)]
@@ -161,7 +167,7 @@ class H(BaseHTTPRequestHandler):
         rec = {"receipt_id": rid, "client_id": cid, "ts": time.time(), "claims": claims,
                "credits_awarded": n, "calibration": {"ok": ok, "failed": bad},
                "flagged": not ok, "reservoir_note": RESERVOIR_NOTE, "onchain": "PENDING (devnet memo later)"}
-        rec["claim_norm"] = 2
+        rec["claim_norm"] = 2; rec["nonce"] = nonce
         rec["protocol_version"] = PROTOCOL_VERSION; rec["claim_schema"] = CLAIM_SCHEMA
         rec["digest"] = token_bridge.receipt_digest(rec)
         mac = token_bridge.receipt_mac(rec)  # AEGIS_RECEIPT_HMAC; secret never logged

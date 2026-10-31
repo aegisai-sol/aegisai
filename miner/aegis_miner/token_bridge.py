@@ -12,6 +12,8 @@ FEE_SHARE_CAP, RESERVOIR_PERIOD_CAP = 0.70, 0.005
 def receipt_digest(rec):
     """Canonical SHA-256 of a receipt (what gets anchored via devnet memo later)."""
     core = {k: rec[k] for k in ("receipt_id", "client_id", "claims", "credits_awarded") if k in rec}
+    if "nonce" in rec:  # nonce-bound receipts (replay protection) also bind ts, so TTL can't be dodged by editing ts
+        core.update(nonce=rec["nonce"], ts=rec.get("ts"))
     return hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 def hmac_secret():

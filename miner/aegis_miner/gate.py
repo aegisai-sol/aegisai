@@ -44,19 +44,34 @@ def _receipts(store):
             try: yield json.load(open(os.path.join(store, f)))
             except Exception: continue
 
-def decide(action, store, claim=None, digest=None, now=None):
+NONCE_RE = re.compile(r"[A-Za-z0-9_-]{8,128}")
+
+def valid_nonce(n): return isinstance(n, str) and bool(NONCE_RE.fullmatch(n))
+
+def nonce_owners(store, nonce):
+    """receipt_ids in the store carrying this nonce (used for replay detection)."""
+    return {r.get("receipt_id") for r in _receipts(store) if r.get("nonce") == nonce}
+
+def decide(action, store, claim=None, digest=None, now=None, nonce=None):
     act = str(action or "").split(" ", 1)[0].casefold()
     if act not in ACTIONS: raise ValueError(f"action must start with one of {ACTIONS}")
     d = digest or (claim_digest(claim) if claim else None)
     if not d or not re.fullmatch(r"[0-9a-f]{64}", d): raise ValueError("need claim text or 64-hex claim_digest")
+    if nonce is not None and not valid_nonce(nonce): raise ValueError("nonce must be 8-128 chars [A-Za-z0-9_-]")
     seen, ttl, now = [], ttl_s(), now if now is not None else time.time()
+    nonces = {}
     for r in _receipts(store):
+        if r.get("nonce"): nonces.setdefault(r["nonce"], set()).add(r.get("receipt_id"))
+        if nonce is not None and r.get("nonce") != nonce: continue  # freshness binding: only the receipt for this nonce counts
         for c in r.get("claims", []):
             if c.get("canary") or not _claim_matches(c.get("text"), d): continue
             intact = r.get("digest") == token_bridge.receipt_digest(r) and token_bridge.mac_ok(r)
             seen.append({"receipt_id": r.get("receipt_id"), "vote": c.get("vote"), "flagged": bool(r.get("flagged")), "intact": intact,
-                         "expired": bool(ttl) and (now - float(r.get("ts") or 0)) > ttl})
+                         "expired": bool(ttl) and (now - float(r.get("ts") or 0)) > ttl, "nonce": r.get("nonce")})
     base = {"action": action, "claim_digest": d, "matches": seen[:10], "note": "Gate is advisory and read-only; no signing or on-chain action."}
+    if nonce is not None: base["nonce"] = nonce
+    if any(m["nonce"] and len(nonces.get(m["nonce"], ())) > 1 for m in seen):
+        return dict(base, decision="DENY", reason="nonce replay: same nonce on multiple receipts")
     if any(not m["intact"] for m in seen): return dict(base, decision="DENY", reason="receipt digest/MAC mismatch (tampered or unsigned)")
     good = [m for m in seen if not m["flagged"] and not m["expired"]]
     base["ttl_s"] = ttl
