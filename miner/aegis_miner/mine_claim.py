@@ -13,7 +13,11 @@ Daily caps mirror the live claim server: a wallet earns at most
 DAILY_CAP_BASE and the network at most GLOBAL_DAILY_CAP_BASE per UTC day
 (keyed by claim time `now`); an over-cap claim is clipped, and once a cap is
 full the claim fails closed ("daily cap reached") without consuming the slice.
-Integer math only; no RPC, no mint here (on-chain mint is a separate step).
+Difficulty grows with the network: up to DIFFICULTY_FREE_DEVICES distinct
+devices claiming in a UTC day get full reward; beyond that every slice is scaled
+by FREE/active (bps), so more miners share the same emission instead of
+printing more. Integer math only; no RPC, no mint here (on-chain mint is a
+separate step).
 """
 import json
 from . import mine_emit as me
@@ -26,6 +30,7 @@ MAX_DEVICES_PER_WALLET = 16
 DAY_SECONDS = 86400
 DAILY_CAP_BASE = 100 * me.BASE          # per wallet per UTC day (matches live claim server)
 GLOBAL_DAILY_CAP_BASE = 100_000 * me.BASE  # whole network per UTC day
+DIFFICULTY_FREE_DEVICES = 100              # full reward until this many devices/day
 B58 = set("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
 
 
@@ -55,6 +60,14 @@ def work_units(power_score, online_seconds, verified_tasks):
     return s * root // 10  # sqrt(p) scaled, power 1 -> s units
 
 
+def difficulty_bps(active_devices, free_devices=DIFFICULTY_FREE_DEVICES):
+    """Reward multiplier in bps (10000 = 1x). Shrinks as the network grows."""
+    a, f = _int(active_devices, "active_devices"), _int(free_devices, "free_devices")
+    if a < 0 or f <= 0:
+        raise ValueError("bad difficulty input")
+    return me.ONE_X_BPS if a <= f else me.ONE_X_BPS * f // a
+
+
 def claim_message(c):
     core = {k: c[k] for k in ("wallet", "device_id", "start", "online_seconds", "power_score", "verified_tasks")}
     return DOMAIN + b"\n" + json.dumps(core, sort_keys=True, separators=(",", ":")).encode()
@@ -72,6 +85,7 @@ class ClaimLedger:
         self.last_end = {}    # device_id -> end ts of last slice
         self.balances = {}    # wallet -> base units
         self.total = 0
+        self.day_devices = {}  # day -> set(device_id) that claimed that UTC day
 
     def bind(self, wallet, device_id, device_pubkey=None):
         if not valid_wallet(wallet):
@@ -103,8 +117,12 @@ class ClaimLedger:
                 Ed25519PublicKey.from_public_bytes(pub).verify(signature or b"", claim_message(c))
             except Exception:
                 raise ValueError("bad signature")
-        amt = me.reward_for_work(units, now=start, genesis=self.genesis)
         day, w = now // DAY_SECONDS, c["wallet"]
+        active = len(self.day_devices.get(day, set()) | {did})
+        dbps = difficulty_bps(active)
+        amt = me.reward_for_work(units, now=start, genesis=self.genesis) * dbps // me.ONE_X_BPS
+        if amt <= 0:
+            raise ValueError("reward rounds to zero")
         used, gused = self.day_used.get((day, w), 0), self.day_used.get((day, "*"), 0)
         amt = min(amt, self.daily_cap - used, self.global_daily_cap - gused)
         if amt <= 0:
@@ -116,7 +134,9 @@ class ClaimLedger:
         self.day_used[(day, w)] = used + amt
         self.day_used[(day, "*")] = gused + amt
         self.total += amt
-        return {"scheme": SCHEME, "wallet": w, "units": units, "agis_base": amt}
+        self.day_devices.setdefault(day, set()).add(did)
+        return {"scheme": SCHEME, "wallet": w, "units": units, "agis_base": amt,
+                "difficulty_bps": dbps, "active_devices": active}
 
     def remaining_today(self, wallet, now):
         """Base units `wallet` can still earn in the UTC day containing `now`."""
