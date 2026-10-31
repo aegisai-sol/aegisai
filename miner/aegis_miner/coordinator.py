@@ -28,6 +28,17 @@ def health():
             "citation_policy": "https-only" if os.environ.get("AEGIS_ALLOW_HTTP") != "1" else "http-allowed(dev)",
             "max_redirects": verify.MAX_REDIRECTS, "anchor": "devnet" if os.environ.get("AEGIS_ANCHOR_RECEIPTS") == "1" else "off",
             "token_mode": token_bridge.state_from_env().mode}
+def list_receipts(limit=20, offset=0):
+    """Newest-first page of receipt summaries (id, mtime, status). No bodies, so pages stay small."""
+    ids = sorted((f for f in (os.listdir(RECEIPTS) if os.path.isdir(RECEIPTS) else []) if f.endswith(".json")),
+                 key=lambda f: (-os.path.getmtime(os.path.join(RECEIPTS, f)), f))
+    items = []
+    for f in ids[offset:offset + limit]:
+        try: r = json.load(open(os.path.join(RECEIPTS, f)))
+        except Exception: r = {}
+        items.append({"receipt_id": f[:-5], "status": r.get("status") or r.get("verdict"), "mtime": int(os.path.getmtime(os.path.join(RECEIPTS, f)))})
+    nxt = offset + limit if offset + limit < len(ids) else None
+    return {"total": len(ids), "limit": limit, "offset": offset, "next_offset": nxt, "items": items}
 class H(BaseHTTPRequestHandler):
     def _send(self, code, obj):
         b = json.dumps(obj).encode(); self.send_response(code)
@@ -42,6 +53,13 @@ class H(BaseHTTPRequestHandler):
                              "txCount": 48211 + len(VOTES), "activeNodes": len([n for n, t in NODES.items() if now - t < 300]),
                              "votesPerHour": [random.randint(900, 1600) for _ in range(23)] + [len(hour)],
                              "recentVotes": [{k: v for k, v in x.items() if k != "_t"} for x in VOTES[-20:]]})
+        elif self.path == "/v1/receipts" or self.path.startswith("/v1/receipts?"):
+            from urllib.parse import urlparse, parse_qs
+            q = parse_qs(urlparse(self.path).query)
+            try: limit, offset = int(q.get("limit", ["20"])[0]), int(q.get("offset", ["0"])[0])
+            except ValueError: return self._send(400, {"error": "limit/offset must be integers"})
+            if not (1 <= limit <= 100 and offset >= 0): return self._send(400, {"error": "limit 1..100, offset >= 0"})
+            self._send(200, list_receipts(limit, offset))
         elif self.path.startswith("/v1/receipts/"):
             rid = os.path.basename(self.path); f = os.path.join(RECEIPTS, rid + ".json")
             if rid.isalnum() and os.path.exists(f): self._send(200, json.load(open(f)))
