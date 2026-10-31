@@ -8,7 +8,7 @@ export const era = (t = Date.now()) => Math.max(0, Math.floor((t - GENESIS) / ER
 export const nextHalving = (t = Date.now()) => GENESIS + (era(t) + 1) * ERA_MS;
 // Device power tiers (benchmarked in-browser, see bench()).
 export const TIERS = { phone: { k: 1, label: 'Phone' }, laptop: { k: 2.5, label: 'Laptop / PC' }, server: { k: 6, label: 'Server' } };
-export const BASE_PER_UNIT = 0.01;               // AGIS per verified unit at era 0, difficulty 1
+export const BASE_PER_UNIT = 0.006738;           // matches claim-server RATE0/10000 at era 0 (not uncapped 0.01)
 export const DAILY_CAP = 100, JOB_CAP = 25;       // AGIS per wallet per day / per RWA job
 // Difficulty rises with active miners: D = 1 + log2(1 + miners/1000)
 export const difficulty = miners => 1 + Math.log2(1 + miners / 1000);
