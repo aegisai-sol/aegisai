@@ -111,6 +111,9 @@ def main(argv=None):
     p.add_argument("--dissent", action="append", help="signed witness dissent JSON (pov-r/card-dissent/1); repeatable; a trusted dissent marks the card disputed")
     p.add_argument("--max-dissent", type=int, default=0, help="tolerate up to N trusted dissents (default 0)")
     p.add_argument("--witness-threshold", type=int, help="require at least k distinct trusted witnesses (k-of-n) besides the coordinator")
+    p.add_argument("--roster", help="governance-signed witness roster JSON (pov-r/witness-roster/1); supplies witness keys + k, needs --governance-key")
+    p.add_argument("--governance-key", action="append", help="pinned roster governance pubkey (hex); repeatable")
+    p.add_argument("--roster-min-seq", type=int, help="last accepted roster seq (rollback protection)")
     p.add_argument("--now", type=float, help="unix time for bundle expiry check")
     p.add_argument("--min-seq", type=int, help="last accepted bundle seq (rollback protection)")
     p.add_argument("--allow-untrusted", action="store_true", help="exit 0 on ok even without pinned root/leaf_count")
@@ -125,6 +128,7 @@ def main(argv=None):
         succ = [_load(x) for x in a.successor or []]
         wits = [_load(x) for x in a.witness or []]
         dis = [_load(x) for x in a.dissent or []]
+        roster = _load(a.roster) if a.roster else None
     except (OSError, ValueError) as e:
         print(json.dumps({"ok": False, "trusted": False, "reason": f"cannot read input: {e}"})); return 2
     if bundle is not None:
@@ -136,14 +140,22 @@ def main(argv=None):
         rots, revs, rets = rots + b["rotations"], revs + b["revocations"], rets + b["retractions"]
     if rets and not a.pubkey:
         print(json.dumps({"ok": False, "trusted": False, "reason": "--retraction needs --pubkey"})); return 1
-    if a.witness_threshold is not None and (card is None or not a.pubkey):
+    if roster is None and a.witness_threshold is not None and (card is None or not a.pubkey):
         print(json.dumps({"ok": False, "trusted": False, "reason": "--witness-threshold needs --card and --pubkey"})); return 1
+    if roster is not None and (card is None or not a.pubkey or not a.governance_key):
+        print(json.dumps({"ok": False, "trusted": False, "reason": "--roster needs --card, --pubkey and --governance-key"})); return 1
     r = verify_offline(obj, card, a.root, a.leaf_count, a.pubkey, revs, rots, rets)
-    if dis and a.witness_threshold is None and r.get("ok") and card is not None:
+    if roster is not None and r.get("ok"):
+        w = ca.check_witnesses_rostered(card, wits, roster, a.governance_key, a.now, a.roster_min_seq, revs, dis,
+                                        a.max_dissent, a.witness_threshold)
+        r["witnesses"] = {"count": w["count"], "threshold": w["threshold"], "signers": w["signers"], "roster_seq": w["roster_seq"],
+                          "dissenters": w["dissenters"], "dissent_reasons": w["dissent_reasons"]}
+        if not w["ok"]: r.update(ok=False, trusted=False, reason=f"witness quorum: {w['reason']}")
+    if dis and roster is None and a.witness_threshold is None and r.get("ok") and card is not None:
         d = ca.check_dissents(card, dis, a.witness_key, revs)
         r["dissent"] = {"dissenters": d["dissenters"], "reasons": d["reasons"]}
         if len(d["dissenters"]) > max(a.max_dissent or 0, 0): r.update(ok=False, trusted=False, reason="disputed by trusted witness dissent")
-    if a.witness_threshold is not None and r.get("ok"):
+    if roster is None and a.witness_threshold is not None and r.get("ok"):
         w = ca.check_witnesses(card, wits, a.witness_key, a.witness_threshold, revs, dis, a.max_dissent)
         r["witnesses"] = {"count": w["count"], "threshold": w["threshold"], "signers": w["signers"],
                           "dissenters": w["dissenters"], "dissent_reasons": w["dissent_reasons"]}

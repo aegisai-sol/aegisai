@@ -557,3 +557,90 @@ def check_dissents(card, dissents, witness_pubkeys, revocations=None):
         return {"dissenters": sorted(found), "reasons": dict(sorted(found.items()))}
     except Exception:
         return {"dissenters": [], "reasons": {}}
+
+ROSTER_SCHEME = "pov-r/witness-roster/1"
+
+def roster_message(signer, seq, issued_at, expires_at, witnesses, threshold):
+    core = {"signer": signer, "seq": seq, "issued_at": issued_at, "expires_at": expires_at,
+            "witnesses": sorted(witnesses), "threshold": threshold}
+    return ROSTER_SCHEME.encode() + b"\n" + _canon(core).encode()
+
+def make_roster(seed_hex, seq, issued_at, expires_at, witnesses, threshold):
+    """Signed witness roster: a governance key publishes WHICH validators count as independent witnesses and the
+    k-of-n threshold, sequenced and expiring. Without it every verifier hand-pins witness keys and picks its own k,
+    so the network can't add/remove validators and a sloppy verifier can silently accept k=1. Witness order doesn't
+    matter. Raises ValueError."""
+    ed, _ = _ed()
+    if ed is None: raise ValueError("ed25519 unavailable (install cryptography)")
+    if not _hexn(seed_hex, 64): raise ValueError("bad seed")
+    if not _int(seq): raise ValueError("seq must be a non-negative int")
+    if not _num(issued_at) or not _num(expires_at) or expires_at <= issued_at: raise ValueError("need 0 <= issued_at < expires_at")
+    ws = sorted({w.lower() for w in witnesses if isinstance(w, str)})
+    if not ws or len(ws) > MAX_WITNESSES or any(not _hexn(w, 64) for w in ws) or len(ws) != len(list(witnesses)):
+        raise ValueError("witnesses must be 1..64 distinct 64-hex pubkeys")
+    if not _int(threshold) or not 1 <= threshold <= len(ws): raise ValueError("need 1 <= threshold <= len(witnesses)")
+    pk = pubkey_from_seed(seed_hex)
+    if pk in ws: raise ValueError("governance key cannot list itself as a witness")
+    sig = ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex)).sign(
+        roster_message(pk, seq, issued_at, expires_at, ws, threshold)).hex()
+    return {"scheme": ROSTER_SCHEME, "signer": pk, "seq": seq, "issued_at": issued_at, "expires_at": expires_at,
+            "witnesses": ws, "threshold": threshold, "sig": sig}
+
+def check_roster(roster, governance_pubkeys, now=None, min_seq=None, card_ts=None, revocations=None):
+    """Verify a pov-r/witness-roster/1 against pinned governance keys. Returns {ok, reason, seq, signer, witnesses,
+    threshold}; never raises. Fails closed on: unpinned/compromised signer (retired only if issued_at >= retired_at),
+    bad/duplicate witness keys, threshold outside 1..n, expired or future-issued roster (now), rollback below
+    min_seq, and - with card_ts - a card outside the roster's [issued_at, expires_at) window, so an old card can't be
+    judged by a later, friendlier roster and a new card can't hide behind a stale one."""
+    try:
+        if not isinstance(roster, dict) or roster.get("scheme") != ROSTER_SCHEME: return {"ok": False, "reason": "not a witness roster"}
+        pk, seq, ia, ea, ws, k, sig = (roster.get(x) for x in ("signer", "seq", "issued_at", "expires_at", "witnesses", "threshold", "sig"))
+        if not _hexn(pk, 64) or not _hexn(sig, 128) or not _int(seq) or not _num(ia) or not _num(ea) or ea <= ia:
+            return {"ok": False, "reason": "bad roster fields"}
+        if not isinstance(ws, list) or not ws or len(ws) > MAX_WITNESSES or any(not _hexn(w, 64) for w in ws) \
+                or len(set(ws)) != len(ws) or pk in ws:
+            return {"ok": False, "reason": "bad roster witnesses"}
+        if not _int(k) or not 1 <= k <= len(ws): return {"ok": False, "reason": "bad roster threshold"}
+        gov = {g.lower() for g in (governance_pubkeys or []) if isinstance(g, str)}
+        if not gov or any(not _hexn(g, 64) for g in gov): return {"ok": False, "reason": "no valid governance pubkey"}
+        if pk not in gov: return {"ok": False, "reason": "roster signer not trusted"}
+        ed, _ = _ed()
+        if ed is None: return {"ok": False, "reason": "ed25519 unavailable"}
+        try: ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(sig), roster_message(pk, seq, ia, ea, ws, k))
+        except Exception: return {"ok": False, "reason": "bad signature"}
+        for c in (check_revocation(r) for r in revocations or []):
+            if c and c[0] == pk and (c[1] == "compromised" or ia >= c[2]): return {"ok": False, "reason": "roster signer revoked"}
+        if now is not None:
+            if not _num(now): return {"ok": False, "reason": "bad now"}
+            if now >= ea: return {"ok": False, "reason": "roster expired"}
+            if ia > now: return {"ok": False, "reason": "roster issued in the future"}
+        if min_seq is not None and (not _int(min_seq) or seq < min_seq): return {"ok": False, "reason": "roster rollback (seq < last seen)"}
+        if card_ts is not None and (not _num(card_ts) or not ia <= card_ts < ea):
+            return {"ok": False, "reason": "card ts outside roster validity window"}
+        return {"ok": True, "reason": None, "seq": seq, "signer": pk, "witnesses": list(ws), "threshold": k}
+    except Exception as e:
+        return {"ok": False, "reason": f"malformed: {type(e).__name__}"}
+
+def check_witnesses_rostered(card, witnesses, roster, governance_pubkeys, now=None, min_seq=None, revocations=None,
+                             dissents=None, max_dissent=0, min_threshold=None):
+    """k-of-n witness check where the witness set and k come from a governance-signed roster valid at the card's ts.
+    min_threshold lets a cautious verifier demand MORE than the roster's k (never less). Never raises."""
+    try:
+        ts = card.get("ts") if isinstance(card, dict) else None
+        r = check_roster(roster, governance_pubkeys, now, min_seq, ts if _num(ts) else -1, revocations)
+        if not r["ok"]:
+            return {"ok": False, "count": 0, "threshold": None, "signers": [], "reason": f"roster: {r['reason']}",
+                    "dissenters": [], "dissent_reasons": {}, "roster_seq": None}
+        k = r["threshold"]
+        if min_threshold is not None:
+            if not _int(min_threshold) or min_threshold < 1:
+                return {"ok": False, "count": 0, "threshold": k, "signers": [], "reason": "bad min_threshold",
+                        "dissenters": [], "dissent_reasons": {}, "roster_seq": r["seq"]}
+            k = max(k, min_threshold)
+        out = check_witnesses(card, witnesses, r["witnesses"], k, revocations, dissents, max_dissent)
+        out.setdefault("dissenters", []); out.setdefault("dissent_reasons", {})
+        out["roster_seq"] = r["seq"]
+        return out
+    except Exception as e:
+        return {"ok": False, "count": 0, "threshold": None, "signers": [], "reason": f"malformed: {type(e).__name__}",
+                "dissenters": [], "dissent_reasons": {}, "roster_seq": None}
