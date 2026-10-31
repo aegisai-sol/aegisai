@@ -1,6 +1,6 @@
 """PoV-R verify path: decompose AI text into micro-claims and check each one.
 Methods: arithmetic (exact), source (fetch cited URL, quote substring), heuristic (keyword, low conf)."""
-import hashlib, re, urllib.request
+import hashlib, os, re, urllib.request
 
 FALSE_MARKERS = ["flat", "sun orbits", "always", "never", "100% guaranteed", "cure"]
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
@@ -58,9 +58,21 @@ def _html_text(raw):
 
 TITLE_RE = re.compile(r"(?is)<title[^>]*>(.*?)</title>")
 
+def _guard_url(url):
+    """SSRF guard: only public http(s) hosts may be fetched by the coordinator."""
+    import ipaddress, socket, urllib.parse
+    if not url.startswith(("http://", "https://")): raise ValueError("only http(s) URLs")
+    host = urllib.parse.urlsplit(url).hostname or ""
+    for info in socket.getaddrinfo(host, None):
+        ip = ipaddress.ip_address(info[4][0])
+        # Some sandboxes/proxies resolve every host to fake-IP 198.18.0.0/15; opt in explicitly.
+        if os.environ.get("AEGIS_ALLOW_FAKEIP") and ip in ipaddress.ip_network("198.18.0.0/15"): continue
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise ValueError("refusing non-public host")
+
 def fetch_page(url, timeout=8):
     """Returns (title, normalized_text)."""
-    if not url.startswith(("http://", "https://")): raise ValueError("only http(s) URLs")
+    _guard_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         raw = r.read(2_000_000).decode(r.headers.get_content_charset() or "utf-8", "replace")
@@ -70,13 +82,65 @@ def fetch_page(url, timeout=8):
 
 def fetch(url, timeout=8): return fetch_page(url, timeout)[1]
 
-def check_url_only(url, page_fetcher=fetch_page):
-    """URL cited without a quote: prove the page exists (title + hash) but can't confirm the claim."""
+STOP = set("""a an the and or but of to in on at for with by from as is are was were be been being this that these those it its
+which who whom whose what when where how than then so such per via into over under about after before also not no
+says say said according see study page source docs report states stated shows show i we you they he she our their""".split())
+WORD_RE = re.compile(r"[a-z\u0400-\u04ff][a-z0-9\u0400-\u04ff'-]{2,}")
+NUM_RE = re.compile(r"(?<![\w.])-?\d+(?:[.,]\d+)?%?")
+
+def _terms(t):
+    return {w for w in WORD_RE.findall(t.casefold()) if w not in STOP}
+
+def _nums(t): return {n.replace(",", ".") for n in NUM_RE.findall(t)}
+
+def claim_core(text):
+    """Claim text minus URLs — the assertion we must find support for."""
+    return norm(URL_RE.sub(" ", text))
+
+def _passages(body, size=3):
+    sents = [x for x in re.split(r"(?<=[.!?])\s+", body) if x.strip()]
+    for k in range(len(sents)):
+        yield " ".join(sents[k:k + size])
+
+def support_check(claim_text, body):
+    """Find the passage in `body` that best supports `claim_text`.
+    Score = share of claim content-terms present in the passage; numbers in the claim must appear
+    in that passage (a number mismatch on an otherwise matching passage = contradiction)."""
+    terms, nums = _terms(claim_text), _nums(claim_text)
+    if not terms: return {"support": 0.0, "verdict": "NO_CONTENT", "evidence": ""}
+    best, best_p = -1.0, ""
+    for p in _passages(body):
+        sc = len(terms & _terms(p)) / len(terms)
+        if sc > best: best, best_p = sc, p
+    missing = sorted(nums - _nums(best_p)) if nums else []
+    if best >= 0.7 and not missing: v = "SUPPORTED"
+    elif best >= 0.7 and missing: v = "CONTRADICTED"
+    elif best >= 0.4: v = "PARTIAL"
+    else: v = "NOT_FOUND"
+    r = {"support": round(max(best, 0.0), 2), "verdict": v, "evidence": best_p[:300]}
+    if missing: r["numbers_missing"] = missing
+    return r
+
+def _fingerprint(url, title, body):
+    import time
+    return {"source_hash": hashlib.sha256(body[:50_000].encode()).hexdigest(), "page_title": title,
+            "content_chars": len(body), "fetched_at": int(time.time()), "source_url": url}
+
+SUPPORT_VOTE = {"SUPPORTED": ("TRUE", 0.8), "CONTRADICTED": ("FALSE", 0.75), "NOT_FOUND": ("FALSE", 0.7),
+                "PARTIAL": ("UNSURE", 0.5), "NO_CONTENT": ("UNSURE", 0.5)}
+
+def check_url_only(url, page_fetcher=fetch_page, claim_text=""):
+    """URL cited without a quote: prove the page exists, fingerprint it, then check the claim's
+    assertion against the retrieved text (Proof-of-Source support check)."""
     try: title, body = page_fetcher(url)
     except Exception as e:
         return {"vote": "FALSE", "confidence": 0.7, "method": "source", "error": "cited URL unreachable: " + str(e)[:100]}
-    return {"vote": "UNSURE", "confidence": 0.5, "method": "source", "page_title": title,
-            "source_hash": hashlib.sha256(body[:50_000].encode()).hexdigest(), "note": "no quote to match"}
+    r = {"method": "source", **_fingerprint(url, title, body)}
+    core = claim_core(claim_text)
+    if not _terms(core):
+        return dict(r, vote="UNSURE", confidence=0.5, note="no quote to match", support={"verdict": "NO_CONTENT", "support": 0.0})
+    sup = support_check(core, body); vote, conf = SUPPORT_VOTE[sup["verdict"]]
+    return dict(r, vote=vote, confidence=conf, support=sup, note="claim " + sup["verdict"].lower().replace("_", " ") + " by cited page")
 
 CANARY_POOL = [("7 + 5 = 12"), ("9 * 8 = 72"), ("100 - 37 = 63"), ("144 / 12 = 12"), ("15 + 27 = 42")]
 
@@ -96,18 +160,26 @@ def canary_ok(claims, client_votes=None):
     return not bad, bad
 
 def check_source(url, quote, fetcher=fetch):
+    """Quoted citation: exact (normalized) match, else fuzzy best-passage match (>=0.9 term overlap)."""
     try: body = fetcher(url)
     except Exception as e:
         return {"vote": "UNSURE", "confidence": 0.0, "method": "source", "error": str(e)[:120]}
     h = hashlib.sha256(body[:50_000].encode()).hexdigest()
-    ok = norm(quote).casefold() in body.casefold()
-    return {"vote": "TRUE" if ok else "FALSE", "confidence": 0.9 if ok else 0.75, "method": "source", "source_hash": h}
+    if norm(quote).casefold() in body.casefold():
+        return {"vote": "TRUE", "confidence": 0.9, "method": "source", "source_hash": h,
+                "support": {"verdict": "EXACT_QUOTE", "support": 1.0}}
+    sup = support_check(quote, body)
+    if sup["verdict"] == "SUPPORTED" and sup["support"] >= 0.9:
+        return {"vote": "TRUE", "confidence": 0.75, "method": "source", "source_hash": h,
+                "support": dict(sup, verdict="NEAR_QUOTE"), "note": "quote paraphrased, not verbatim"}
+    return {"vote": "FALSE", "confidence": 0.75, "method": "source", "source_hash": h, "support": sup,
+            "note": "quote not found on cited page"}
 
 def check_claim(claim, fetcher=fetch, page_fetcher=fetch_page):
     if claim.get("url") and claim.get("quote"):
         return check_source(claim["url"], claim["quote"], fetcher)
     if claim.get("url"):
-        return check_url_only(claim["url"], page_fetcher)
+        return check_url_only(claim["url"], page_fetcher, claim.get("text", ""))
     if ARITH_RE.search(claim["text"]):
         ok, c = tiny_check(claim["text"])
         return {"vote": "TRUE" if ok else "FALSE", "confidence": c, "method": "arithmetic"}

@@ -42,7 +42,7 @@ def test_list_split_and_url_dots():
     assert cs[2]["url"] == "https://example.com/a.b" and len(cs) == 4
 
 def test_url_only():
-    r = verify.check_claim({"text": "see", "url": "http://e"}, page_fetcher=lambda u: ("Example Domain", "body"))
+    r = verify.check_claim({"text": "see https://e", "url": "http://e"}, page_fetcher=lambda u: ("Example Domain", "body"))
     assert r["vote"] == "UNSURE" and r["note"] == "no quote to match" and r["page_title"] == "Example Domain" and len(r["source_hash"]) == 64
     def boom(u): raise OSError("dns")
     assert verify.check_claim({"text": "see", "url": "http://e"}, page_fetcher=boom)["vote"] == "FALSE"
@@ -51,3 +51,27 @@ def test_canary():
     c = verify.make_canary("x"); c.update(verify.check_claim(c))
     assert c["vote"] == "TRUE" and verify.canary_ok([c])[0]
     assert not verify.canary_ok([c], {c["claim_id"]: "FALSE"})[0]
+
+
+PAGE = ("Example", "Solana launched its mainnet beta in 2020. The network targets 400 ms block times. "
+        "Validators stake SOL to secure consensus.")
+
+def test_support_supported_contradicted_notfound():
+    f = lambda u: PAGE
+    r = verify.check_claim({"text": "Solana launched mainnet beta in 2020 https://x", "url": "https://x"}, page_fetcher=f)
+    assert r["vote"] == "TRUE" and r["support"]["verdict"] == "SUPPORTED" and "2020" in r["support"]["evidence"]
+    assert len(r["source_hash"]) == 64 and r["content_chars"] > 0
+    r = verify.check_claim({"text": "Solana launched mainnet beta in 2018 https://x", "url": "https://x"}, page_fetcher=f)
+    assert r["vote"] == "FALSE" and r["support"]["verdict"] == "CONTRADICTED" and r["support"]["numbers_missing"] == ["2018"]
+    r = verify.check_claim({"text": "Bitcoin halving reduces miner rewards https://x", "url": "https://x"}, page_fetcher=f)
+    assert r["vote"] == "FALSE" and r["support"]["verdict"] == "NOT_FOUND"
+
+def test_near_quote():
+    body = "Validators stake SOL to secure the consensus of the network."
+    r = verify.check_source("https://x", "validators stake SOL to secure consensus network", fetcher=lambda u: body)
+    assert r["vote"] == "TRUE" and r["support"]["verdict"] == "NEAR_QUOTE"
+
+def test_ssrf_guard():
+    import pytest
+    with pytest.raises(ValueError): verify.fetch_page("http://127.0.0.1:1/")
+    with pytest.raises(ValueError): verify.fetch_page("file:///etc/passwd")

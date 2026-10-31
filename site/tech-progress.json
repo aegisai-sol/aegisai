@@ -1,0 +1,16 @@
+{
+  "project": "AegisAI PoV-R",
+  "updated_at": "2026-10-31T03:40:00+02:00",
+  "milestones": [
+    {"id": "decompose", "title": "Micro-claim decomposition (lists, sentences, URL-safe)", "status": "done", "updated_at": "2026-10-25T12:00:00+02:00", "note": "aegis_miner/verify.py split_sentences + decompose"},
+    {"id": "arith", "title": "Exact arithmetic checker", "status": "done", "updated_at": "2026-10-25T12:00:00+02:00", "note": "Deterministic, conf 0.99"},
+    {"id": "verify-api", "title": "Coordinator POST /v1/verify + receipts", "status": "done", "updated_at": "2026-10-27T12:00:00+02:00", "note": "Receipt per request, GET /v1/receipts/<id>"},
+    {"id": "credits", "title": "Non-transferable Proof Credits", "status": "done", "updated_at": "2026-10-27T12:00:00+02:00", "note": "Awarded only for confident votes"},
+    {"id": "canaries", "title": "Calibration canaries", "status": "done", "updated_at": "2026-10-28T12:00:00+02:00", "note": "Failed canary = flagged receipt, 0 credits"},
+    {"id": "quote-match", "title": "Cited quote match on source page", "status": "done", "updated_at": "2026-10-28T12:00:00+02:00", "note": "Exact normalized match + SHA-256 page hash"},
+    {"id": "pos-support", "title": "Proof-of-Source: claim support check vs cited page", "status": "active", "updated_at": "2026-10-31T03:40:00+02:00", "note": "Shipped: fetch + fingerprint + best-passage support, number contradiction, near-quote, SSRF guard. Next: multi-fetcher consensus"},
+    {"id": "multi-fetch", "title": "Multi-node fetch consensus (independent miners agree on hash)", "status": "next", "updated_at": "2026-10-31T03:40:00+02:00", "note": "Miners re-fetch; receipt valid when >=2 hashes/verdicts agree"},
+    {"id": "semantic", "title": "Semantic (embedding/NLI) support scoring", "status": "next", "updated_at": "2026-10-31T03:40:00+02:00", "note": "Replace term overlap for paraphrases and negation"},
+    {"id": "devnet-memo", "title": "Receipt hash anchored on Solana devnet", "status": "next", "updated_at": "2026-10-31T03:40:00+02:00", "note": "Option A: devnet only, no mainnet mint"}
+  ]
+}
