@@ -12,6 +12,21 @@
 <div id="hS" class="hidden mt-4 text-xs"><div class="text-slate-400">Fingerprint (SHA-256):</div><div id="hash" class="font-mono text-cyan break-all"></div></div>
 <div class="grid sm:grid-cols-2 gap-3 mt-4 text-sm"><label>Mode<select id="mode" class="w-full mt-1 bg-deep border border-cyan/20 rounded p-2"><option value="private" selected>Private (default) — encrypted in your browser + public receipt</option><option value="public">Public anchor — fingerprint only, no file leaves</option></select></label>
 <label>Type<select id="kind" class="w-full mt-1 bg-deep border border-cyan/20 rounded p-2"><option value="doc">Document / PDF</option><option value="invoice">Invoice / receipt</option><option value="deed">Deed / drawing</option><option value="image">Photo</option><option value="video">Video</option><option value="sheet">Excel / report</option></select></label></div>
+<label class="block mt-4 text-sm">Seal validity · Валидност на печата
+<select id="validFor" class="w-full mt-1 bg-deep border border-cyan/20 rounded p-2 text-sm">
+<option value="0">Forever · Завинаги (default)</option>
+<option value="5">5 hours</option>
+<option value="24">24 hours</option>
+<option value="168">7 days</option>
+<option value="720">30 days</option>
+<option value="8760">1 year</option>
+<option value="17520">2 years</option>
+<option value="43800">5 years</option>
+<option value="87600">10 years</option>
+<option value="438000">50 years</option>
+</select>
+<span class="text-[11px] text-slate-500">Written into the Solana Memo. Anyone with the QR can see if it is still inside the window. The chain record itself stays forever. · Записва се в Memo; веригата пази записа завинаги.</span>
+</label>
 <p class="mt-4 text-xs text-emerald-300">No wallet needed to seal. · Не е нужен портфейл за печат. Wallet is only for miners and optional recovery.</p><button id="sub" class="mt-5 w-full py-3 rounded-xl bg-gold text-navy font-bold disabled:opacity-40" disabled>Create seal</button>
 <div id="res" class="hidden mt-4 text-sm bg-deep border border-cyan/20 rounded p-4 space-y-1"></div>
 <label class="flex gap-2 mt-3 text-xs text-slate-300"><input id="wrapK" type="checkbox"> <b>Optional</b> · Bind recovery to my Phantom wallet (lost phone + lost key → unlock with the same wallet; we never get the key) · Възстановяване чрез моя Phantom портфейл</label>
@@ -51,7 +66,7 @@ if(priv){const K=await crypto.subtle.generateKey({name:'AES-GCM',length:256},tru
 const hd=new TextEncoder().encode(JSON.stringify({name:file.name,mime:file.type||'application/octet-stream'})),env=new Uint8Array(4+hd.length+buf.byteLength);new DataView(env.buffer).setUint32(0,hd.length);env.set(hd,4);env.set(new Uint8Array(buf),4+hd.length);
 ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},K,env);key='agis1:'+hex(await crypto.subtle.exportKey('raw',K))}
 const rec={id:null,fingerprint:hash,name:file.name,mode:priv?'private':'public',status:'local',ts:Date.now()};let note='';
-if(online){try{const body={fingerprint:hash,meta:{type:k,name:priv?undefined:file.name,bytes:file.size}};if(priv&&ct.byteLength<2.9e6){body.ciphertextB64=b64(ct);body.meta.iv=hex(iv);body.meta.enc='aes-gcm-env1'}else if(priv)note='Encrypted copy too big for v1 network — sealed as fingerprint only (keep the original file).';
+if(online){try{const vh=Number(($('validFor')||{}).value||0);const body={fingerprint:hash,meta:{type:k,name:priv?undefined:file.name,bytes:file.size}};if(vh>0)body.validForHours=vh;if(priv&&ct.byteLength<2.9e6){body.ciphertextB64=b64(ct);body.meta.iv=hex(iv);body.meta.enc='aes-gcm-env1'}else if(priv)note='Encrypted copy too big for v1 network — sealed as fingerprint only (keep the original file).';
 const r=await createJob(body);rec.id=r.id;rec.status='open'}catch(e){note='Network error: '+e.message+' — saved locally.'}}else note='Network offline — saved locally.';
 rec.stored=!!(priv&&rec.id&&ct.byteLength<2.9e6);
 if(key&&$('saveK').checked&&rec.id){const ks=KS();ks[rec.id]=key;localStorage.agisSealKeys=JSON.stringify(ks)}
