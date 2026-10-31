@@ -424,3 +424,66 @@ def resolve_current_card(card, successors, retractions, trusted_pubkeys, rotatio
         return {"status": "invalid", "reason": "supersession chain too deep", "current": None, "path": path}
     except Exception as e:
         return {"status": "invalid", "reason": f"malformed: {type(e).__name__}", "current": None, "path": []}
+
+WITNESS_SCHEME = "pov-r/card-witness/1"
+MAX_WITNESSES = 64
+
+def witness_message(card, witness_pubkey):
+    """Bytes a witness signs: the card's pinned core (same as card-attest) plus the coordinator's attestation pubkey
+    and the witness's own pubkey, under a distinct domain so a witness sig can never be replayed as a card attestation."""
+    core = card_message(card)[len(SCHEME) + 1:].decode()
+    at = card.get("attestation") if isinstance(card.get("attestation"), dict) else {}
+    meta = {"coordinator": at.get("pubkey"), "witness": witness_pubkey}
+    return WITNESS_SCHEME.encode() + b"\n" + core.encode() + b"\n" + _canon(meta).encode()
+
+def make_witness(seed_hex, card):
+    """Independent witness co-signature over an ATTESTED card. A witness is a validator that re-checked the receipt
+    (e.g. replayed the consensus votes / re-fetched sources) and vouches for the same pinned fields. Collecting k of n
+    witness co-signatures means a single compromised coordinator key can no longer mint a card a k-of-n verifier
+    accepts. Raises ValueError on bad input."""
+    ed, _ = _ed()
+    if ed is None: raise ValueError("ed25519 unavailable (install cryptography)")
+    if not _hexn(seed_hex, 64): raise ValueError("bad seed")
+    if not isinstance(card, dict) or not isinstance(card.get("attestation"), dict): raise ValueError("card must be attested")
+    pk = pubkey_from_seed(seed_hex)
+    sig = ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex)).sign(witness_message(card, pk)).hex()
+    return {"scheme": WITNESS_SCHEME, "pubkey": pk, "receipt_id": card.get("receipt_id"), "digest": card.get("digest"), "sig": sig}
+
+def check_witnesses(card, witnesses, witness_pubkeys, threshold, revocations=None):
+    """Count distinct trusted witnesses that validly co-signed this card. Returns {ok, count, threshold, signers,
+    reason}; never raises. Rules: only keys in witness_pubkeys count (strangers can't pad the count); each key counts
+    once (duplicates ignored); the card's own coordinator key never counts as a witness (independence); a witness key
+    with a valid self-signed 'compromised' revocation doesn't count, a 'retired' one counts only for cards with
+    ts < revoked_at; a sig over a different card (other receipt_id/digest/coordinator) fails. threshold < 1 or greater
+    than the number of distinct usable witness keys fails closed."""
+    try:
+        if not isinstance(card, dict): return {"ok": False, "count": 0, "threshold": threshold, "signers": [], "reason": "proof card must be an object"}
+        if not _int(threshold) or threshold < 1: return {"ok": False, "count": 0, "threshold": threshold, "signers": [], "reason": "bad threshold"}
+        at = card.get("attestation") if isinstance(card.get("attestation"), dict) else {}
+        coord = at.get("pubkey")
+        keys = {k.lower() for k in (witness_pubkeys or []) if isinstance(k, str) and _hexn(k.lower(), 64)} - {coord}
+        if threshold > len(keys): return {"ok": False, "count": 0, "threshold": threshold, "signers": [], "reason": "threshold exceeds usable witness keys"}
+        ed, _ = _ed()
+        if ed is None: return {"ok": False, "count": 0, "threshold": threshold, "signers": [], "reason": "ed25519 unavailable"}
+        dead, retired = set(), {}
+        for rv in revocations or []:
+            c = check_revocation(rv)
+            if c is None: continue
+            if c[1] == "compromised": dead.add(c[0])
+            else: retired[c[0]] = min(c[2], retired.get(c[0], c[2]))
+        ts = card.get("ts")
+        good = set()
+        for w in list(witnesses or [])[:MAX_WITNESSES]:
+            if not isinstance(w, dict) or w.get("scheme") != WITNESS_SCHEME: continue
+            pk, sig = w.get("pubkey"), w.get("sig")
+            if not _hexn(pk, 64) or not _hexn(sig, 128) or pk not in keys or pk in good or pk in dead: continue
+            if pk in retired and (isinstance(ts, bool) or not isinstance(ts, (int, float)) or ts >= retired[pk]): continue
+            if w.get("receipt_id") != card.get("receipt_id") or w.get("digest") != card.get("digest"): continue
+            try: ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pk)).verify(bytes.fromhex(sig), witness_message(card, pk))
+            except Exception: continue
+            good.add(pk)
+        n = len(good)
+        return {"ok": n >= threshold, "count": n, "threshold": threshold, "signers": sorted(good),
+                "reason": None if n >= threshold else f"only {n} of {threshold} required witnesses"}
+    except Exception as e:
+        return {"ok": False, "count": 0, "threshold": threshold, "signers": [], "reason": f"malformed: {type(e).__name__}"}

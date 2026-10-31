@@ -106,6 +106,9 @@ def main(argv=None):
     p.add_argument("--equivocation", action="append", help="equivocation proof JSON (pov-r/equivocation/1); repeatable; a proven-equivocating bundle signer is rejected")
     p.add_argument("--retraction", action="append", help="signed card retraction JSON (pov-r/card-retract/1); repeatable; needs --pubkey")
     p.add_argument("--successor", action="append", help="candidate replacement proof card JSON; repeatable; with --retraction, follows 'superseded' links to the card that currently vouches")
+    p.add_argument("--witness-key", action="append", help="trusted independent witness pubkey (hex); repeatable")
+    p.add_argument("--witness", action="append", help="witness co-signature JSON (pov-r/card-witness/1); repeatable")
+    p.add_argument("--witness-threshold", type=int, help="require at least k distinct trusted witnesses (k-of-n) besides the coordinator")
     p.add_argument("--now", type=float, help="unix time for bundle expiry check")
     p.add_argument("--min-seq", type=int, help="last accepted bundle seq (rollback protection)")
     p.add_argument("--allow-untrusted", action="store_true", help="exit 0 on ok even without pinned root/leaf_count")
@@ -118,6 +121,7 @@ def main(argv=None):
         eqs = [_load(x) for x in a.equivocation or []]
         rets = [_load(x) for x in a.retraction or []]
         succ = [_load(x) for x in a.successor or []]
+        wits = [_load(x) for x in a.witness or []]
     except (OSError, ValueError) as e:
         print(json.dumps({"ok": False, "trusted": False, "reason": f"cannot read input: {e}"})); return 2
     if bundle is not None:
@@ -129,7 +133,13 @@ def main(argv=None):
         rots, revs, rets = rots + b["rotations"], revs + b["revocations"], rets + b["retractions"]
     if rets and not a.pubkey:
         print(json.dumps({"ok": False, "trusted": False, "reason": "--retraction needs --pubkey"})); return 1
+    if a.witness_threshold is not None and (card is None or not a.pubkey):
+        print(json.dumps({"ok": False, "trusted": False, "reason": "--witness-threshold needs --card and --pubkey"})); return 1
     r = verify_offline(obj, card, a.root, a.leaf_count, a.pubkey, revs, rots, rets)
+    if a.witness_threshold is not None and r.get("ok"):
+        w = ca.check_witnesses(card, wits, a.witness_key, a.witness_threshold, revs)
+        r["witnesses"] = {"count": w["count"], "threshold": w["threshold"], "signers": w["signers"]}
+        if not w["ok"]: r.update(ok=False, trusted=False, reason=f"witness quorum: {w['reason']}")
     if bundle is not None: r["bundle_seq"] = b["seq"]
     if r.get("retracted") and r.get("superseded_by") and card is not None:
         sc = ca.resolve_current_card(card, succ, rets, a.pubkey, rots, revs)
