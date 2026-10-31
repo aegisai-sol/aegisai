@@ -39,9 +39,25 @@ def list_receipts(limit=20, offset=0):
         items.append({"receipt_id": f[:-5], "status": r.get("status") or r.get("verdict"), "mtime": int(os.path.getmtime(os.path.join(RECEIPTS, f)))})
     nxt = offset + limit if offset + limit < len(ids) else None
     return {"total": len(ids), "limit": limit, "offset": offset, "next_offset": nxt, "items": items}
+from aegis_miner.ratelimit import RateLimiter
+LIMITER = RateLimiter.from_env()
+RATE_LIMITED = ("/v1/verify", "/v1/fee-preview")
+OPENAPI = {"openapi": "3.0.3", "info": {"title": "AegisAI Coordinator", "version": "0.1.0",
+           "description": "Proof-of-Source verification coordinator (devnet/testing; no mainnet token)."},
+           "paths": {p: {m: {"summary": d, "responses": {"200": {"description": "OK"}, **({"429": {"description": "Rate limited (Retry-After header)"}} if p in RATE_LIMITED else {})}}}
+                     for p, m, d in (("/v1/verify", "post", "Verify a claim against an HTTPS source; returns signed receipt"),
+                                     ("/v1/fee-preview", "post", "Preview 70/20/5/5 fee split"),
+                                     ("/v1/fetch-check", "post", "Fetch-only source check"),
+                                     ("/v1/consensus", "post", "Multi-node quorum verify"),
+                                     ("/v1/health", "get", "Coordinator health"),
+                                     ("/v1/receipts", "get", "Paginated receipt summaries (limit, offset)"),
+                                     ("/v1/receipts/{id}", "get", "Single receipt"),
+                                     ("/v1/token-state", "get", "Token/bridge state (mint blocked)"),
+                                     ("/v1/openapi.json", "get", "This document"))}}
 class H(BaseHTTPRequestHandler):
-    def _send(self, code, obj):
+    def _send(self, code, obj, headers=()):
         b = json.dumps(obj).encode(); self.send_response(code)
+        for k, v in headers: self.send_header(k, v)
         for k, v in (("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*"), ("Access-Control-Allow-Headers", "Content-Type")): self.send_header(k, v)
         self.end_headers(); self.wfile.write(b)
     def do_OPTIONS(self): self._send(204, {})
@@ -74,9 +90,13 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/v1/token-state":
             st = token_bridge.state_from_env(); self._send(200, {"mode": st.mode, "mint": st.mint()})
         elif self.path == "/v1/health": self._send(200, health())
+        elif self.path == "/v1/openapi.json": self._send(200, OPENAPI)
         elif self.path == "/api/votes": self._send(200, VOTES[-100:])
         else: self._send(404, {"error": "not found"})
     def do_POST(self):
+        if self.path in RATE_LIMITED:
+            ok, retry = LIMITER.check(self.client_address[0])
+            if not ok: return self._send(429, {"error": "rate limited", "retry_after": retry}, (("Retry-After", str(retry)),))
         if self.path == "/v1/verify": return self._verify()
         if self.path == "/v1/fee-preview": return self._fee_preview()
         if self.path in ("/v1/fetch-check", "/v1/consensus"):
