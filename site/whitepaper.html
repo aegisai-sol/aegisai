@@ -1,0 +1,116 @@
+<!doctype html><html lang="en" class="text-slate-100"><head><title>Whitepaper — AegisAI PoV-R</title><meta name="description" content="Mine AGIS by verifying AI claims on weak machines. Solana SPL token, 1B fixed supply."><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="assets/agis-logo.png"><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#0a1628"><script src="https://cdn.tailwindcss.com"></script><script>tailwind.config={theme:{extend:{colors:{navy:"#0a1628",deep:"#060e1c",cyan:"#22d3ee",gold:"#f5c451"}}}}</script><style>body{background:radial-gradient(ellipse at top,#10264a 0,#060e1c 60%)}.card{background:rgba(16,38,74,.55);border:1px solid rgba(34,211,238,.18);border-radius:1rem;backdrop-filter:blur(6px)}.grad{background:linear-gradient(90deg,#22d3ee,#f5c451);-webkit-background-clip:text;color:transparent}</style><style>.wp h1{font-size:2.2rem;font-weight:800;margin:.5rem 0 1rem;background:linear-gradient(90deg,#22d3ee,#f5c451);-webkit-background-clip:text;color:transparent}.wp h2{font-size:1.4rem;font-weight:700;color:#22d3ee;margin:2rem 0 .6rem;border-bottom:1px solid rgba(34,211,238,.2);padding-bottom:.3rem}.wp p,.wp li{color:#cbd5e1;line-height:1.7}.wp ul,.wp ol{padding-left:1.4rem;margin:.5rem 0}.wp ul{list-style:disc}.wp ol{list-style:decimal}.wp table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.9rem}.wp th,.wp td{border:1px solid rgba(34,211,238,.2);padding:.5rem;text-align:left}.wp th{color:#f5c451}.wp code{color:#f5c451}.wp strong{color:#fff}
+@media print{nav,.noprint{display:none!important}body{background:#fff!important}.wp *{color:#000!important;-webkit-text-fill-color:#000}.wp th,.wp td{border-color:#999}.card{background:#fff!important;border:none}}</style></head><body class="font-sans"><nav class="sticky top-0 z-50 bg-deep/80 backdrop-blur border-b border-cyan/10"><div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4"><a href="index.html" class="flex items-center gap-2 font-bold"><img src="assets/agis-logo.png" class="w-9 h-9 rounded-full">AegisAI <span class="text-gold">AGIS</span></a><div class="hidden md:flex gap-5 text-sm text-slate-300 ml-6"><a href="index.html#pov">Proof-of-Verification</a><a href="index.html#tokenomics">Tokenomics</a><a href="roadmap.html">Roadmap</a><a href="protocol.html">Protocol</a><a href="whitepaper.html" class="text-cyan">Whitepaper</a><a href="dashboard.html">Dashboard</a><a href="verify.html" class="text-gold">Verify</a><a href="miner.html">Mine in browser</a></div><div class="ml-auto text-right"><button data-wallet-btn class="px-4 py-2 rounded-lg bg-cyan text-navy font-semibold hover:bg-gold transition">Connect Wallet</button><div data-wallet-net class="text-[10px] text-slate-400 mt-1"></div></div></div></nav><main class="max-w-3xl mx-auto px-4 py-12"><div class="noprint flex gap-3 mb-6 text-sm"><a href="whitepaper.md" class="px-3 py-1 rounded border border-cyan/30">Markdown</a><button onclick="print()" class="px-3 py-1 rounded border border-gold/40 text-gold">Print / Save PDF</button></div><article class="wp card p-6 md:p-10"><h1>AegisAI Whitepaper — Proof-of-Verification Reservoir (PoV-R)</h1>
+<p><em>Version 0.2 · 31 October 2026 · Status: MVP / pre-TGE (Option A — no token mint until audit + LP capital). Numbers are design targets, not measurements. Not financial advice.</em></p>
+<h2>Abstract</h2>
+<p>AegisAI is a verification network for AI output. Instead of building another large language model, AegisAI splits AI answers into small, checkable <strong>micro-claims</strong>, has many low-power nodes verify them, aggregates the votes with commit–reveal consensus, and issues a <strong>receipt</strong> that can be anchored on Solana. The economic layer, the <strong>Reservoir</strong>, rewards correct verification with <strong>Proof Credits</strong> that convert to AGIS only against real, paid verification fees.</p>
+<h2>1. Problem</h2>
+<ol>
+<li><strong>AI hallucinations.</strong> LLMs state wrong facts, sums and fake citations with confidence. Businesses using AI need checked output.</li>
+<li><strong>Verification is mis-priced.</strong> Most checks (a date, a sum, a quote, a URL) are tiny. Sending each one to a frontier model or a human is slow and costly.</li>
+<li><strong>No portable proof.</strong> When an answer <em>was</em> checked, there is usually no receipt a third party can audit.</li>
+</ol>
+<h2>2. Solution overview</h2>
+<p><strong>PoV-R = Proof-of-Verification + Reservoir.</strong>
+- <strong>PoV</strong> is the protocol: decompose → assign → verify → commit–reveal → aggregate → attest.
+- <strong>Reservoir</strong> is the economics: hard-capped supply, Proof Credits for correct votes, conversion capped by real fee revenue.</p>
+<h2>3. The Proof-of-Verification round</h2>
+<ol>
+<li><strong>Decompose</strong> — AI text is split into micro-claims (e.g. "17 × 23 = 391", "Source X says Y").</li>
+<li><strong>Assign</strong> — each claim goes to <em>k</em> random nodes (k = 5–15), weighted by reputation (and stake later), across device classes.</li>
+<li><strong>Verify</strong> — nodes run deterministic methods: arithmetic/rules, <strong>Proof-of-Source</strong>, small local models later. Output: TRUE / FALSE / UNSURE + confidence.</li>
+<li><strong>Commit–reveal</strong> — nodes commit <code>H(vote‖salt‖node‖task)</code> then reveal, preventing copy-voting.</li>
+<li><strong>Aggregate</strong> — weighted ≥ 2/3 supermajority finalizes; otherwise escalate.</li>
+<li><strong>Attest</strong> — batch Merkle root of verdicts to Solana (Memo first, dedicated program later). Each claim gets a receipt ID.</li>
+</ol>
+<h2>4. Verification methods</h2>
+<ul>
+<li><strong>Arithmetic &amp; rules</strong> — deterministic checks of numbers, units, dates.</li>
+<li><strong>Proof-of-Source</strong> — fetch the cited URL and check whether the quoted text actually exists on the page (normalized fingerprint). Catches fabricated citations — one of the most common AI failures.</li>
+<li><strong>Calibration canaries</strong> — known-answer tasks injected at random to detect lazy or dishonest nodes.</li>
+<li><strong>Small models (planned)</strong> — quantized NLI/fact classifiers (&lt; 1 GB, ONNX/WebGPU) for claims rules can't settle.</li>
+</ul>
+<h2>5. Reservoir &amp; Proof Credits</h2>
+<ul>
+<li>Hard cap: <strong>1,000,000,000 AGIS</strong>; mint authority revoked after genesis.</li>
+<li>Nodes earn <strong>Proof Credits</strong> (off-chain ledger first, Solana later) for votes that match the final verdict and pass canaries.</li>
+<li>Credits convert to AGIS <strong>only against paid verification fees</strong>: at most <strong>70% of fees</strong> per epoch and at most <strong>0.5% of Reservoir</strong> per epoch. No fees → no emission.</li>
+<li>This ties token issuance to real usage rather than inflation.</li>
+</ul>
+<h2>6. Role of the AGIS token</h2>
+<p>AGIS is integral to PoV-R: it pays verifiers (via Reservoir conversion), can be used for verification fees, and later for node stake/slashing. <strong>Option A:</strong> no mint and no trading until an external audit and LP capital from a raise exist. Product first, token second.</p>
+<h2>7. AI — but not another LLM</h2>
+<p>AegisAI does not compete with OpenAI, xAI or others. Any model's output (theirs, or a future AegisAI helper) can pass through PoV. AegisAI is the trust layer: AI produces, PoV verifies, receipts prove.</p>
+<h2>8. Architecture</h2>
+<p>Requesters → <strong>Coordinator API</strong> (decomposer, task queue, assigner, commit/reveal store, aggregator, credits ledger) → nodes (browser PWA, Python, Docker later) → batched attestation on Solana.
+Key endpoints: <code>POST /v1/verify</code>, <code>GET /v1/receipts/{id}</code>, <code>POST /v1/nodes/register</code>, <code>GET /v1/tasks/next</code>, commit/reveal.
+Nodes sign with their wallet (ed25519); private keys never leave the device.</p>
+<h2>9. Security model</h2>
+<table>
+<thead>
+<tr>
+<th>Threat</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Copy-voting</td>
+<td>Commit–reveal, salted task variants</td>
+</tr>
+<tr>
+<td>Collusion</td>
+<td>Random assignment, cross-device quorums, correlation detection</td>
+</tr>
+<tr>
+<td>Sybil</td>
+<td>Reputation warm-up, rate limits, stake later, optional device attestation</td>
+</tr>
+<tr>
+<td>Always-TRUE free-riding</td>
+<td>Calibration canaries</td>
+</tr>
+<tr>
+<td>Coordinator trust</td>
+<td>Phase 1 centralized but publishes commitments; later multi-coordinator + on-chain settlement</td>
+</tr>
+</tbody>
+</table>
+<h2>10. Future vertical: RWA Doc Check</h2>
+<p>Tokenized real-world assets rely on documents (NAV reports, filings, insurance, audits). AI summaries of these are increasingly used — and can be wrong. <strong>RWA Doc Check</strong> applies Proof-of-Source to them: "NAV is X" or "the asset is insured" is checked against the actual public filing, with a receipt. AegisAI will not tokenize assets or act as a price oracle; it verifies claims about them. Planned after the core Verify product (6–12 months).</p>
+<h2>11. Current status (honest)</h2>
+<ul>
+<li><strong>Live:</strong> Verify web app (arithmetic, Proof-of-Source, calibration canaries, receipts, in-browser Proof Credits) at bold-thistle-3z5f.here.now/verify.html.</li>
+<li><strong>Code:</strong> github.com/aegisai-sol/aegisai — tests passing for the verify engine.</li>
+<li><strong>Simulated:</strong> multi-node network, browser miner, dashboard stats.</li>
+<li><strong>Not yet:</strong> token mint, on-chain program, audit, paying customers.</li>
+</ul>
+<h2>12. Roadmap</h2>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Deliverable</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NOW</td>
+<td>Verify app + Proof-of-Source + receipts</td>
+</tr>
+<tr>
+<td>NEAR</td>
+<td>Public Verify API, Solana Memo attestations, Proof Credits on devnet</td>
+</tr>
+<tr>
+<td>NEXT</td>
+<td>Small on-device models, multi-node network, audit, raise → LP → AGIS TGE</td>
+</tr>
+<tr>
+<td>LATER</td>
+<td>RWA Doc Check pilot, mobile app, decentralized coordinators, staking/slashing</td>
+</tr>
+</tbody>
+</table>
+<h2>13. Risks &amp; limitations</h2>
+<p>Small models are weaker than frontier models; PoV relies on decomposition, rules, quorum and escalation. Phase 1 is centralized. No audit yet. Regulatory treatment of tokens varies by jurisdiction. Nothing here is an offer to sell securities or financial advice.</p>
+<p><em>Contact: aibot.universe@gmail.com · X @AegisAI_Sol · Telegram @AegisAI_Sol</em></p></article></main><script src="js/wallet.js"></script></body></html>
