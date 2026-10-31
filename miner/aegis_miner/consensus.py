@@ -118,15 +118,19 @@ def peer_liveness(endpoints, now=_time.time, stale_s=300):
 # --- peer health hysteresis: dead after N consecutive fails, alive again after M consecutive oks ---
 class PeerHealth:
     """Flap-resistant peer state. Starts 'alive'. Ids only (peer0..N); URLs never exposed."""
-    def __init__(self, fail_threshold=3, recover_threshold=2):
+    def __init__(self, fail_threshold=3, recover_threshold=2, half_life=0.0, clock=None):
         if fail_threshold < 1 or recover_threshold < 1: raise ValueError("thresholds must be >= 1")
         self.n, self.m = int(fail_threshold), int(recover_threshold)
+        import math, time as _t
+        hl = float(half_life)
+        if not math.isfinite(hl) or hl < 0: raise ValueError("half_life must be finite and >= 0")
+        self.half_life, self._clock = hl, (clock or _t.monotonic)
         self._s = {}  # endpoint -> {"alive", "fails", "oks"}
 
     def observe(self, endpoint, ok):
         s = self._s.setdefault(endpoint, {"alive": True, "fails": 0, "oks": 0})
         if ok:
-            s["oks"] += 1; s["fails"] = 0
+            s["oks"] += 1; s["fails"] = 0; s["last_ok"] = self._clock()
             if not s["alive"] and s["oks"] >= self.m: s["alive"] = True
         else:
             s["fails"] += 1; s["oks"] = 0
@@ -140,13 +144,20 @@ class PeerHealth:
     # A fresh/unknown peer has weight 1.0; a peer with a >= cap success streak counts double.
     # Bounded so one long-lived peer can never outvote two fresh honest peers (2.0 == 1.0 + 1.0, ties
     # break on raw count). Any failure resets oks -> weight drops back to 1.0 immediately.
+    # Idle fade (optional, half_life > 0, env AEGIS_WEIGHT_HALFLIFE seconds; 0 = off):
+    #   bonus = min(oks, cap)/cap * 0.5 ** (idle / half_life),  idle = now - last successful observation
+    #   weight = 1 + bonus   -> stale streaks decay toward 1.0 (never below 1.0 while alive).
     weight_cap = 10
 
     def weight(self, endpoint):
         s = self._s.get(endpoint)
         if s is None: return 1.0
         if not s["alive"]: return 0.0
-        return 1.0 + min(s["oks"], self.weight_cap) / self.weight_cap
+        bonus = min(s["oks"], self.weight_cap) / self.weight_cap
+        if self.half_life > 0 and bonus > 0 and "last_ok" in s:
+            idle = max(0.0, self._clock() - s["last_ok"])
+            bonus *= 0.5 ** (idle / self.half_life)
+        return 1.0 + bonus
 
     def weights(self, endpoints):
         """{peerN: weight} keyed by ids only (URLs never exposed)."""
@@ -162,7 +173,7 @@ class PeerHealth:
         alive = [e for e in endpoints if self.is_alive(e)]
         return {"alive": len(alive), "dead": len(endpoints) - len(alive), "known": len(endpoints),
                 "fail_threshold": self.n, "recover_threshold": self.m,
-                "weights": self.weights(endpoints), "weight_cap": self.weight_cap}
+                "weights": self.weights(endpoints), "weight_cap": self.weight_cap, "weight_half_life": self.half_life}
 
     def alive_endpoints(self, endpoints): return [e for e in endpoints if self.is_alive(e)]
 
@@ -171,7 +182,28 @@ def _env_int(name, default):
     try: return max(1, int(os.environ.get(name, default)))
     except ValueError: return default
 
-PEER_HEALTH = PeerHealth(_env_int("AEGIS_PEER_FAILS", 3), _env_int("AEGIS_PEER_RECOVERS", 2))
+def _env_float(name, default):
+    import os, math
+    try:
+        v = float(os.environ.get(name, default))
+        return v if math.isfinite(v) and v >= 0 else default
+    except ValueError: return default
+
+_TRUTHY = {"1", "true", "yes", "on"}
+def weighted_quorum_enabled(env=None):
+    """AEGIS_WEIGHTED_QUORUM truthy (1/true/yes/on, case-insensitive) -> weighted voting."""
+    import os
+    env = os.environ if env is None else env
+    return str(env.get("AEGIS_WEIGHTED_QUORUM", "")).strip().lower() in _TRUTHY
+
+def resolve_weighted(body_value, env=None):
+    """Per-request override: JSON bool wins; absent/None -> env flag; anything else -> ValueError."""
+    if body_value is None: return weighted_quorum_enabled(env)
+    if not isinstance(body_value, bool): raise ValueError("weighted must be a boolean")
+    return body_value
+
+PEER_HEALTH = PeerHealth(_env_int("AEGIS_PEER_FAILS", 3), _env_int("AEGIS_PEER_RECOVERS", 2),
+                         half_life=_env_float("AEGIS_WEIGHT_HALFLIFE", 0.0))
 
 
 # --- quorum collection skips dead peers (hysteresis) ---
