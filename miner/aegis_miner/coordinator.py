@@ -33,7 +33,8 @@ def health():
             "token_mode": token_bridge.state_from_env().mode,
             "peer_liveness": consensus.peer_liveness(peers),
             "peer_health": consensus.PEER_HEALTH.summary(peers), "protocol_version": PROTOCOL_VERSION, "claim_schema": CLAIM_SCHEMA,
-            "weighting": weighting_summary(), "peer_weights": consensus.PEER_HEALTH.breakdowns(peers)}
+            "weighting": weighting_summary(), "peer_weights": consensus.PEER_HEALTH.breakdowns(peers),
+            "quorum_strength": dict(consensus.STRENGTH.summary(), min_strength=consensus.env_min_strength())}
 
 def weighting_summary(env=None):
     """Is weighted quorum on? half_life only when fade is set (>0)."""

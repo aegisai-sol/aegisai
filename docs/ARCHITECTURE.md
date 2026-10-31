@@ -50,5 +50,7 @@ Horizontal coordinators sharded by task id; attestation batched; read-heavy dash
 - `AEGIS_WEIGHT_HALFLIFE` — idle-fade of uptime bonus, seconds (0 = off).
 - `AEGIS_DISAGREE_CAP` — max halvings for consecutive dissent (default 4, 0 = off, clamp 16).
 - `AEGIS_WEIGHT_FLOOR` — minimum weight for an *alive* peer, float in [0,1] (default 0 = off; >1 clamps to 1; invalid → 0). Dead peers stay 0. Breakdown reports `floored: true` when applied.
+- `AEGIS_MIN_STRENGTH` — float in [0,1] (default 0 = off; >1 clamps to 1; invalid → 0). A VALID/VALID_VERDICT round with `quorum_strength` below it is downgraded to `NO_CONSENSUS` (`reason: low_strength`, `downgraded_from`), and the receipt digest reflects the downgrade.
+- `AEGIS_STRENGTH_WINDOW` — rolling window of recent rounds for `/v1/health.quorum_strength` {latest, avg, min, samples, window, rounds, downgraded, min_strength} (default 20, clamp 1..1000; strengths only, no URLs/claims).
 
 `/v1/health` exposes `peer_weights` ({peerN: {bonus, fade, dissent, weight, alive, floored}}, ids only, same shape as `/v1/peers/ping`). Weighted `/v1/consensus` records include `weights_used` (ids-only snapshot before the round's health updates) for audit.

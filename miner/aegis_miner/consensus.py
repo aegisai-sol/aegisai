@@ -24,7 +24,7 @@ def http_node(node_id, endpoint, timeout=15):
     run.node_id = node_id
     return run
 
-def consensus(url, claim_text, nodes, quorum=2, weights=None):
+def consensus(url, claim_text, nodes, quorum=2, weights=None, min_strength=0.0):
     """weights: optional {node_id: float>0}. When given, the verdict is picked by WEIGHTED tally
     (sum of voter weights) instead of raw count; quorum still requires >= quorum distinct agreeing nodes.
     Missing node ids default to weight 1.0. Hash agreement stays count-based (bytes are bytes)."""
@@ -66,6 +66,11 @@ def consensus(url, claim_text, nodes, quorum=2, weights=None):
     rec["quorum_strength"] = round(num / den, 6) if den > 0 else 0.0
     # errored: count of nodes that failed to answer (excluded from tallies; ids in per_node)
     rec["errored"] = sum(1 for r in results if r.get("error"))
+    # min_strength (AEGIS_MIN_STRENGTH, 0 = off): a VALID/VALID_VERDICT round whose quorum_strength is
+    # below the threshold is downgraded to NO_CONSENSUS (reason low_strength); digest reflects the downgrade.
+    if min_strength and rec["valid"] and rec["quorum_strength"] < min_strength:
+        rec.update(status="NO_CONSENSUS", valid=False, consensus_vote=None, consensus_hash=None,
+                   reason="low_strength", downgraded_from=status, min_strength=min_strength)
     rec["receipt_digest"] = hashlib.sha256(json.dumps({k: rec[k] for k in ("url", "claim", "status", "consensus_hash", "consensus_vote")}, sort_keys=True).encode()).hexdigest()
     return rec
 
@@ -284,7 +289,8 @@ def build_nodes(peer_endpoints, health=None, quorum=2, node_factory=None):
     skipped = [f"peer{i}" for i, e in enumerate(peers) if e not in alive]
     return nodes, {"mode": "peers", "known": len(peers), "alive": len(alive), "skipped": skipped}
 
-def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node_factory=None, weighted=False):
+def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node_factory=None, weighted=False,
+                    min_strength=None, tracker=None):
     """Consensus over alive peers; too few alive -> NO_CONSENSUS with reason (no exception).
     Passive health: a peer that errors during collection counts as a failed observation."""
     health = health or PEER_HEALTH
@@ -297,7 +303,10 @@ def consensus_alive(url, claim_text, peer_endpoints, health=None, quorum=2, node
     w = None
     if weighted and _p:  # local self node = 1.0; peers by uptime streak (see PeerHealth.weight)
         w = dict(health.weights(_p)); w.setdefault("self", 1.0)
-    rec = consensus(url, claim_text, nodes, quorum=quorum, weights=w)
+    ms = env_min_strength() if min_strength is None else min_strength
+    rec = consensus(url, claim_text, nodes, quorum=quorum, weights=w, min_strength=ms)
+    t = tracker or STRENGTH; t.record(rec["quorum_strength"], rec["status"])
+    if rec.get("reason") == "low_strength": t.note_downgrade()
     peers = [p.strip() for p in peer_endpoints if p and p.strip()]
     for r in rec["per_node"]:
         nid = r.get("node") or ""
@@ -319,3 +328,35 @@ def attach_breakdowns(health, endpoints, results):
     """Add ids-only weight breakdown to ping results (no URLs; keyed by position)."""
     for e, r in zip(endpoints, results): r["weight"] = health.breakdown(e)
     return results
+
+
+# --- quorum strength rolling stats + AEGIS_MIN_STRENGTH ---
+def env_min_strength(env=None):
+    """AEGIS_MIN_STRENGTH float in [0,1]; invalid/negative/non-finite -> 0 (off); >1 -> 1."""
+    return _env_floor("AEGIS_MIN_STRENGTH", 0.0, env)
+
+class StrengthTracker:
+    """Rolling window of recent consensus rounds (strength only; no URLs/claims stored)."""
+    def __init__(self, window=20):
+        if isinstance(window, bool) or not isinstance(window, int) or window < 1: raise ValueError("window must be int >= 1")
+        from collections import deque
+        self._d = deque(maxlen=window); self.window = window; self.downgraded = 0; self.rounds = 0
+    def record(self, strength, status=None):
+        self._d.append(float(strength)); self.rounds += 1
+        return strength
+    def note_downgrade(self): self.downgraded += 1
+    def summary(self):
+        d = list(self._d)
+        return {"latest": d[-1] if d else None, "avg": round(sum(d) / len(d), 6) if d else None,
+                "min": min(d) if d else None, "samples": len(d), "window": self.window, "rounds": self.rounds,
+                "downgraded": self.downgraded}
+
+def _env_window(env=None):
+    """AEGIS_STRENGTH_WINDOW int in [1,1000]; invalid/<1 -> 20; >1000 -> 1000."""
+    import os
+    env = os.environ if env is None else env
+    try: v = int(str(env.get("AEGIS_STRENGTH_WINDOW", 20)).strip())
+    except ValueError: return 20
+    return 20 if v < 1 else min(v, 1000)
+
+STRENGTH = StrengthTracker(_env_window())
