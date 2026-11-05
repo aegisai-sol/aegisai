@@ -72,3 +72,12 @@ When a job reaches `verified`/`failed`, the claim server sends one **Solana Memo
 - **A2 · Wallet-bound key wrap (lost phone AND lost `agis1:` key):** on Private seal (checkbox, default ON when Phantom connected) the browser signs `AEGIS/rwa-keywrap/v1|wallet|sealId|fp` in Phantom; wrap key = HKDF-SHA256(ikm=signature, salt="AEGIS/rwa-keywrap/v1", info=`sealId|fp`) → AES-GCM-256; blob = b64(iv12‖AESGCM(rawKey)). Ed25519 is deterministic → same wallet re-derives on any device. The derivation signature never leaves the browser. Blob attached via `POST /api/rwa/jobs/:id/keywrap` authorised by a *separate* signature `AEGIS/rwa-keywrap-attach/v1|wallet|id|fp|ts`; write-once. Job fields: `keyWrap`, `wrapWallet`, `wrapAlg`. Retrieve → "Unlock with wallet" → sign → unwrap → decrypt locally.
 - Honesty: we never custody keys; only that wallet can unwrap; nobody can forge a wrap for another wallet's seal (attach requires that wallet's signature, write-once). Caveat: a wallet that signs the exact keywrap message on a phishing site leaks that seal's wrap key — only sign on aegisai-sol.github.io.
 - **Seed also lost:** social recovery 2-of-3 guardians (Shamir shares of the AES key, each wrapped to a guardian wallet) — stub/TODO, not implemented.
+
+
+## L4 blob extension (prep · SW v33)
+
+- Client package `AEGIS/l4/v1`: ciphertextB64 + iv + fingerprint + sealId + blobHash (= SHA-256 of ciphertext) + optional passphraseWrap. Never plaintext. Never keys to claim API.
+- Planned second Memo (backward-compatible; not auto-written yet): `AEGIS/rwa-blob/v1|<sealId12>|<blobHash64>|<cidOr->`
+- Existing `AEGIS/rwa/v1|…` Memo unchanged (seal id + file fingerprint + time + validUntil).
+- Pin provider: not configured — bring-your-own IPFS/Arweave pin until JWT exists on ops.
+- Quantum honesty: AES-256-GCM is quantum-ready for secrecy; Solana ed25519 signatures are not post-quantum.
