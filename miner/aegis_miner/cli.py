@@ -1,4 +1,4 @@
-"""AegisAI (AGIS) miner/validator. Default: simulation. AEGIS_SOLANA_SUBMIT=1 -> memo tx per vote (devnet)."""
+"""AegisAI (AGIS) miner/validator. Default: simulation. --pov-wallet: real PoV-R batches."""
 import argparse, hashlib, json, os, random, re, time, uuid
 from datetime import datetime, timezone
 
@@ -12,6 +12,7 @@ CLAIMS = [
     ("10 * 3 = 30", True),
 ]
 from aegis_miner.verify import tiny_check, FALSE_MARKERS  # noqa: F401
+
 
 def load_config(path="config.yaml"):
     cfg = {"node_id": "agis-node-local-001", "mock_mode": True,
@@ -27,9 +28,11 @@ def load_config(path="config.yaml"):
             cfg[k] = {"true": True, "false": False}.get(ev.lower(), ev)
     return cfg
 
+
 def fake_claim():
     text, truth = random.choice(CLAIMS)
     return {"claim_id": str(uuid.uuid4())[:8], "text": text, "_truth": truth}
+
 
 def run(cfg, seconds, interval, submitter=None):
     end = time.time() + seconds; n = correct = 0
@@ -62,12 +65,41 @@ def run(cfg, seconds, interval, submitter=None):
         time.sleep(interval)
     print(f"\nDone: {n} tasks, accuracy {correct}/{n}, votes -> {cfg['votes_path'] if cfg['dry_run_submit'] else 'not saved'}")
 
+
+def run_pov(wallet: str, *, base: str, n: int, local: bool, tier: str, cores: int):
+    from aegis_miner import pov_mine as pm
+
+    if not wallet or not wallet.strip():
+        raise SystemExit("wallet required for PoV-R mine (Phantom pubkey)")
+    if local:
+        secret = (os.environ.get("AEGIS_POV_SECRET") or "test-secret").encode()
+        out = pm.local_demo(secret, wallet.strip(), n=n)
+        print(json.dumps({k: out[k] for k in ("wallet", "batchId", "n", "answersHex", "grade", "msg", "local", "elapsedMs")}, indent=2))
+        if not out["grade"]["pass"]:
+            raise SystemExit("local grade failed accuracy gate")
+        print(f"\nOK local PoV: {out['grade']['correct']}/{out['grade']['n']} · sign msg then POST /api/claim")
+        return
+    out = pm.run_once(wallet.strip(), base=base, n=n, tier=tier, cores=cores)
+    print(json.dumps({k: out[k] for k in ("wallet", "batchId", "n", "answersHex", "msg", "issuedAt", "elapsedMs", "tier", "note")}, indent=2))
+    print(f"\nOK live PoV: solved {out['n']} wallet-bound tasks in {out['elapsedMs']} ms — approve msg in wallet, then claim")
+
+
 def main():
-    p = argparse.ArgumentParser(prog="aegis_miner", description="AegisAI PoV miner stub (dry-run)")
+    p = argparse.ArgumentParser(prog="aegis_miner", description="AegisAI PoV miner (simulation or wallet-bound PoV-R)")
     p.add_argument("--seconds", type=float, default=30)
     p.add_argument("--interval", type=float, default=1.0)
     p.add_argument("--config", default="config.yaml")
-    a = p.parse_args(); cfg = load_config(a.config)
+    p.add_argument("--pov-wallet", default="", help="Solana wallet pubkey → fetch+solve real PoV-R batch (no keys)")
+    p.add_argument("--pov-n", type=int, default=12, help="tasks per batch (1..120); live default often 120")
+    p.add_argument("--pov-base", default=os.environ.get("AEGIS_CLAIM_BASE", "https://agis-claim.onrender.com"))
+    p.add_argument("--pov-local", action="store_true", help="offline HMAC demo (no network); AEGIS_POV_SECRET optional")
+    p.add_argument("--tier", default="laptop")
+    p.add_argument("--cores", type=int, default=4)
+    a = p.parse_args()
+    if a.pov_wallet or a.pov_local:
+        run_pov(a.pov_wallet or "LocalDemo1111111111111111111111111111111", base=a.pov_base, n=a.pov_n, local=a.pov_local or not a.pov_wallet, tier=a.tier, cores=a.cores)
+        return
+    cfg = load_config(a.config)
     sub = None
     if os.environ.get("AEGIS_SOLANA_SUBMIT") == "1":
         from aegis_miner.solana_submit import SolanaSubmitter
