@@ -9,8 +9,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as S from '../docs/js/pov-solver.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const localPov = path.resolve(here, '../token/scripts/pov-tasks.mjs');
 const repo = process.env.CLAIM_REPO || path.resolve(here, '../../agis-claim-push');
-const povPath = path.join(repo, 'pov-tasks.mjs');
+const povPath = fs.existsSync(localPov) ? localPov : path.join(repo, 'pov-tasks.mjs');
 const hasPov = fs.existsSync(povPath);
 const W = '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin';
 
