@@ -87,7 +87,9 @@ diluted by other jobs. Settling uses up that miner's credits on that receipt onc
 claim voucher bound to miner + receipt + job fee + amount; tampering, double settle, or paying more than the job's
 miner share all fail. (`miner/aegis_miner/credit_settle.py`; library only, no mint.)
 
-## Mining creates AGIS (pov-r/mine-emit/2)
+## Mining creates AGIS (pov-r/mine-emit/3)
+
+Soft-go: each graded work unit earns `emission_per_second × UNIT_BPS / 10000` (UNIT_BPS=1, same as live claim-server). Network difficulty is FREE/active wallets/day (full until 100).
 
 - Max supply: **10,000,000,000 AGIS** on Solana. Nobody can make more.
 - **85% (8.5B) is created only by mining** — over time, as miners do work.

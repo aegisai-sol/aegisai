@@ -29,11 +29,15 @@ def test_total_never_exceeds():
 
 def test_reward():
     r = m.emission_per_second(0)
-    assert m.reward_for_work(10, now=G, genesis=G) == 10 * r
-    assert m.reward_for_work(10, 15000, now=G, genesis=G) == 15 * r
-    assert m.reward_for_work(10, 90000, now=G, genesis=G) == 20 * r
+    # UNIT_BPS soft-go: unit earn = rate * units * UNIT_BPS / 10000 (matches claim-server)
+    assert m.UNIT_BPS == 1
+    pay = lambda n, boost=m.ONE_X_BPS, rate=r: rate * n * boost * m.UNIT_BPS // (m.ONE_X_BPS * 10000)
+    assert m.reward_for_work(10, now=G, genesis=G) == pay(10)
+    assert m.reward_for_work(10, 15000, now=G, genesis=G) == pay(10, 15000)
+    assert m.reward_for_work(10, 90000, now=G, genesis=G) == pay(10, m.MAX_BOOST_BPS)
     assert m.reward_for_work(0, now=G, genesis=G) == 0
-    assert m.reward_for_work(10, now=G + E, genesis=G) == 10 * (r // 2)
+    assert m.reward_for_work(10, now=G + E, genesis=G) == pay(10, rate=r // 2)
+    assert abs(pay(1) / m.BASE - 0.0067383307965) < 1e-9
 
 @pytest.mark.parametrize("args", [(-1, 0), (1.5, 0), (1, 5000), (True, 0), (1, "x")])
 def test_fail_closed(args):

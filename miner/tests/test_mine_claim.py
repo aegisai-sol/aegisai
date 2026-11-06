@@ -71,12 +71,14 @@ def test_daily_wallet_cap_clips_then_blocks():
     assert nxt["agis_base"] > 0
 
 def test_global_cap_shared_across_wallets():
-    l = mc.ClaimLedger(G, daily_cap=10**30, global_daily_cap=5 * me.BASE)
-    l.bind(W, "d1"); l.bind(W2, "d2"); now = G + 600
-    a = l.claim(C(), now=now)["agis_base"]
-    assert a == 5 * me.BASE
+    # Soft-go unit pay is ~0.0067 AGIS; use a tiny global cap so first claim clips it.
+    cap = me.BASE // 10  # 0.1 AGIS
+    l = mc.ClaimLedger(G, daily_cap=10**30, global_daily_cap=cap)
+    l.bind(W, "d1"); l.bind(W2, "d2"); now = G + 4000
+    a = l.claim(C(online_seconds=3600, power_score=100, verified_tasks=1), now=now)["agis_base"]
+    assert a == cap
     with pytest.raises(ValueError, match="daily cap"):
-        l.claim(C(wallet=W2, device_id="d2"), now=now)
+        l.claim(C(wallet=W2, device_id="d2", start=G + 3600, online_seconds=60), now=now)
     assert l.remaining_today(W2, now) == 0 and l.total == a
 
 def test_caps_must_be_positive():

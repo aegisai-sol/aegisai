@@ -1,4 +1,4 @@
-"""pov-r/mine-emit/2 — AGIS emission schedule (off-chain preview library).
+"""pov-r/mine-emit/3 — AGIS emission schedule (off-chain preview library).
 
 Plain rules: max 10,000,000,000 AGIS. 85% is created only by mining, 10% team
 (slow vest), 5% ecosystem/pool. Mining reward halves every ~2 years (era).
@@ -8,9 +8,11 @@ Formula (Bitcoin-style geometric): amounts are integer *base units*
     rate0 = (MINE_ALLOC_BASE // 2) // EMISSION_ERA_SECONDS
     emission_per_second(era) = rate0 >> era
 Sum over all eras < 2*rate0*ERA <= MINE_ALLOC_BASE, so the cap can never be
-exceeded. Integer math only; no floats, no RPC, no keys.
+exceeded. Per-unit pay uses UNIT_BPS (claim-server soft-go): one verified unit
+earns emission_per_second * UNIT_BPS / 10000 at 1x boost. Integer math only;
+no floats, no RPC, no keys.
 """
-SCHEME_ID = "pov-r/mine-emit/2"
+SCHEME_ID = "pov-r/mine-emit/3"
 DECIMALS = 9
 BASE = 10 ** DECIMALS
 MAX_SUPPLY = 10_000_000_000
@@ -24,6 +26,9 @@ EMISSION_ERA_SECONDS = 2 * 365 * 24 * 3600  # ~2 years
 RATE0 = (MINE_ALLOC_BASE // 2) // EMISSION_ERA_SECONDS
 MAX_BOOST_BPS = 20000  # stake can at most double speed
 ONE_X_BPS = 10000
+# Soft-go share of 1s emission paid per verified work unit (matches claim-server UNIT_BPS=1).
+# Full RATE0 is the network schedule; UNIT_BPS/10000 is what one graded unit earns today.
+UNIT_BPS = 1
 
 
 def _int(x, name):
@@ -56,8 +61,10 @@ def emitted_until(now: int, genesis: int) -> int:
 
 
 def reward_for_work(work_units: int, miner_stake_boost: int = 0, *, now: int, genesis: int) -> int:
-    """Base units earned for a work slice. 1 work unit = 1 second of current
-    emission. Boost in bps (0 => 1x, 10000..20000); stake only speeds up."""
+    """Base units earned for a work slice. Matches claim-server:
+    emission_per_second(era) * units * boost * UNIT_BPS / (ONE_X_BPS * 10000).
+    Boost in bps (0 => 1x, 10000..20000); stake only speeds up. UNIT_BPS is the
+    soft-go share of one second of network emission paid per graded unit."""
     work_units = _int(work_units, "work_units")
     boost = _int(miner_stake_boost, "miner_stake_boost")
     if work_units < 0:
@@ -69,7 +76,8 @@ def reward_for_work(work_units: int, miner_stake_boost: int = 0, *, now: int, ge
     boost = min(boost, MAX_BOOST_BPS)
     if work_units == 0:
         return 0
-    return emission_per_second(era_index(now, genesis)) * work_units * boost // ONE_X_BPS
+    return (emission_per_second(era_index(now, genesis)) * work_units * boost * UNIT_BPS
+            // (ONE_X_BPS * 10000))
 
 
 def preview_allocations() -> dict:
