@@ -64,3 +64,44 @@ test('LIVE: prod batch parses and solves', { skip: process.env.LIVE !== '1' && '
   assert.equal(j.tasks.length, 30);
   for (const t of j.tasks) assert.equal(typeof await S.solveTask(t), 'boolean');
 });
+
+const DESK_MSG = S.buildClaimMsg({
+  wallet: W,
+  batchId: '1800000000.0123456789abcdef.3.' + 'b'.repeat(32),
+  answersHex: 'ff',
+  from: '2026-11-07T00:00:00.000Z',
+  to: '2026-11-07T00:02:00.000Z',
+  uuid: 'desk-uuid-1',
+  tier: 'laptop',
+  cores: 8,
+  benchMs: 42,
+});
+
+test('parseDeskClaim accepts CLI prepare_claim shape', () => {
+  const raw = JSON.stringify({
+    wallet: W,
+    batchId: 'x',
+    answersHex: 'ff',
+    msg: DESK_MSG,
+    postBody: { wallet: W, msg: DESK_MSG, sig: null },
+    note: 'Sign msg…',
+  });
+  assert.deepEqual(S.parseDeskClaim(raw), { wallet: W, msg: DESK_MSG });
+  assert.deepEqual(S.parseDeskClaim(raw, W), { wallet: W, msg: DESK_MSG });
+});
+
+test('parseDeskClaim accepts minimal {wallet,msg} and postBody fallback', () => {
+  assert.deepEqual(S.parseDeskClaim({ wallet: W, msg: DESK_MSG }), { wallet: W, msg: DESK_MSG });
+  assert.deepEqual(S.parseDeskClaim({ postBody: { wallet: W, msg: DESK_MSG } }), { wallet: W, msg: DESK_MSG });
+});
+
+test('parseDeskClaim rejects wrong domain, missing fields, wallet mismatch', () => {
+  assert.throws(() => S.parseDeskClaim(''), /paste the desk claim/);
+  assert.throws(() => S.parseDeskClaim('not-json'), /not valid JSON/);
+  assert.throws(() => S.parseDeskClaim({ msg: DESK_MSG }), /missing wallet/);
+  assert.throws(() => S.parseDeskClaim({ wallet: W }), /missing msg/);
+  assert.throws(() => S.parseDeskClaim({ wallet: W, msg: 'AEGIS/other/v1|x' }), /must start with AEGIS\/mine-claim\/v2/);
+  assert.throws(() => S.parseDeskClaim({ wallet: W, msg: DESK_MSG }, 'OtherWallet111111111111111111111111111'), /connected wallet does not match/);
+  const badMsg = DESK_MSG.replace(W, 'OtherWallet111111111111111111111111111');
+  assert.throws(() => S.parseDeskClaim({ wallet: W, msg: badMsg }), /msg wallet does not match/);
+});

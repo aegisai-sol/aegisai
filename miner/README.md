@@ -5,7 +5,7 @@ Lightweight Proof-of-Verification node. Pure stdlib in simulation; runs on Raspb
 | Mode | How | What happens |
 |---|---|---|
 | Simulation (default) | `python3 main.py --seconds 30` | Mock micro-tasks, votes + SHA-256 digest to `data/votes.jsonl`. No network, no keys. |
-| **PoV-R wallet batch** | `python3 -m aegis_miner --pov-wallet <pubkey> --pov-n 12` | Fetches a wallet-bound batch from the claim server, solves multiply/hash/prime tasks, prints unsigned claim `msg` (sign in Phantom; no keys in the miner). `--pov-local` = offline HMAC demo. |
+| **PoV-R wallet batch** | `python3 -m aegis_miner --pov-wallet <pubkey> --pov-n 12` | Fetches a wallet-bound batch from the claim server, solves multiply/hash/prime tasks, prints unsigned claim JSON (`wallet`+`msg`); paste into Mine → **Paste desk claim**, sign with Phantom (no keys in the miner). `--pov-local` = offline HMAC demo. |
 | + Coordinator | `python3 -m aegis_miner.coordinator` then `AEGIS_COORDINATOR=http://localhost:8787 python3 main.py` | Votes POSTed to the mock API; site dashboard reads `/api/stats`. |
 | Solana submit (real txs) | `pip install -r requirements.txt` then `AEGIS_SOLANA_SUBMIT=1 SOLANA_KEYPAIR=../aegisai-token/.keys/devnet.json python3 main.py --seconds 10 --interval 3` | One **SPL Memo** tx per vote: `AGIS|PoV|<node>|<claim>|<vote>|<digest>`, signed by your keypair. **Devnet** by default; `SOLANA_RPC` overrides; `MAINNET=1` for mainnet (costs ~0.000005 SOL/vote). |
 

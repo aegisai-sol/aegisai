@@ -51,3 +51,28 @@ export async function postClaim(base, body, timeoutMs = 90000) {
   const j = await r.json().catch(() => ({ ok: false, error: 'bad response ' + r.status }));
   return { status: r.status, ...j };
 }
+
+// Parse desktop --pov-wallet unsigned claim JSON for browser paste→sign.
+// Accepts full prepare_claim output or a minimal {wallet,msg}. Returns {wallet,msg}.
+export function parseDeskClaim(raw, connectedWallet) {
+  let j = raw;
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (!t) throw new Error('paste the desk claim JSON first');
+    try { j = JSON.parse(t); } catch { throw new Error('not valid JSON'); }
+  }
+  if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('claim must be a JSON object');
+  const wallet = String(j.wallet || j.postBody?.wallet || '').trim();
+  const msg = String(j.msg || j.postBody?.msg || '').trim();
+  if (!wallet) throw new Error('missing wallet');
+  if (!msg) throw new Error('missing msg');
+  if (wallet.includes('|')) throw new Error('bad wallet');
+  if (!msg.startsWith(CLAIM_DOMAIN + '|')) throw new Error('msg must start with ' + CLAIM_DOMAIN + '|');
+  const parts = msg.split('|');
+  if (parts.length !== 10) throw new Error('msg has wrong field count');
+  if (parts[1] !== wallet) throw new Error('msg wallet does not match wallet field');
+  if (connectedWallet != null && String(connectedWallet).trim() !== '') {
+    if (String(connectedWallet).trim() !== wallet) throw new Error('connected wallet does not match desk claim wallet');
+  }
+  return { wallet, msg };
+}
