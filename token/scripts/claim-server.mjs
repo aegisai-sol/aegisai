@@ -8,7 +8,7 @@ import bs58 from 'bs58';
 import { PublicKey, Transaction, TransactionInstruction, sendAndConfirmTransaction } from '@solana/web3.js';
 import { getOrCreateAssociatedTokenAccount, mintTo } from '@solana/spl-token';
 import { connection, loadKeypair, DECIMALS } from './common.mjs';
-import { computeClaim, FREE_WALLETS } from './mine-rules.mjs';
+import { computeClaim, FREE_WALLETS, scheduleGate, minedFromLedger, emittedUntil, eraOf, RATE0, MINE_POOL_BASE, MAX_SUPPLY_BASE, LAUNCH_BASE } from './mine-rules.mjs';
 
 const MINT = new PublicKey('GhSiU95vtKwn7FBAW1u5krxYP2PnpFPotb1LJFZkbzhW');
 const GENESIS = Number(process.env.AGIS_GENESIS || Date.parse('2026-10-31T00:00:00Z') / 1000);
@@ -125,6 +125,11 @@ async function handle(c) {
   const r = computeClaim({ tasks: n, fromSec: tf / 1000, genesisSec: GENESIS, unitBps: UNIT_BPS, wallet: w, day, ledgerDay: ledger.day, dayWallets: ledger.wallets[day] || [], dailyCap: DAILY_CAP, globalCap: GLOBAL_DAILY_CAP, free: Number(process.env.FREE_WALLETS || FREE_WALLETS) });
   if (!r.ok) throw r.error;
   const { amount: amt, used, gused } = r;
+  // Hard ceiling (85% pool + halving schedule + 10B max), floored by on-chain supply so a wiped ledger can't reset it.
+  let chainSupply;
+  try { chainSupply = BigInt((await conn.getTokenSupply(MINT)).value.amount); } catch { throw 'supply check unavailable, try later'; }
+  const g = scheduleGate({ amount: amt, ledgerMined: minedFromLedger(ledger.day), chainSupply, nowSec: now / 1000, genesisSec: GENESIS });
+  if (!g.ok) throw g.error;
   if ((await conn.getBalance(getPayer().publicKey)) < MIN_SOL_LAMPORTS) throw 'payout wallet low on SOL, try later';
   ledger.seen[dg] = 'pending'; save();
   try {
@@ -150,6 +155,17 @@ http.createServer((req, res) => {
     return Promise.all([conn.getTokenSupply(MINT), conn.getSlot().catch(() => null)])
       .then(([s, slot]) => out(200, { ok: true, mint: MINT.toBase58(), supply: s.value.amount, uiAmount: s.value.uiAmount, uiAmountString: s.value.uiAmountString, decimals: s.value.decimals, slot }))
       .catch(e => out(502, { ok: false, error: String(e) }));
+  }
+  if (req.method === 'GET' && url === '/api/mine/schedule') {
+    // Public audit: anyone can recompute this from Solana getTokenSupply + the published constants.
+    const nowSec = Date.now() / 1000, ledgerMined = minedFromLedger(ledger.day), allowed = emittedUntil(nowSec, GENESIS);
+    const base = { ok: true, mint: MINT.toBase58(), genesis: new Date(GENESIS * 1000).toISOString(), era: eraOf(nowSec, GENESIS), eraSeconds: 2 * 365 * 24 * 3600,
+      ratePerSecBase: String(eraOf(nowSec, GENESIS) < 256 ? RATE0 >> BigInt(eraOf(nowSec, GENESIS)) : 0n), minePoolBase: String(MINE_POOL_BASE), maxSupplyBase: String(MAX_SUPPLY_BASE),
+      launchBase: String(LAUNCH_BASE), emittedUntilBase: String(allowed), ledgerMinedBase: String(ledgerMined) };
+    return conn.getTokenSupply(MINT).then(s => {
+      const g = scheduleGate({ amount: 1n, ledgerMined, chainSupply: BigInt(s.value.amount), nowSec, genesisSec: GENESIS });
+      out(200, { ...base, chainSupplyBase: s.value.amount, chainMinedBase: String(g.chainMined), minedTotalBase: String(g.minedTotal), headroomBase: String(g.headroom), withinSchedule: g.minedTotal <= allowed });
+    }).catch(() => out(200, { ...base, chainSupplyBase: null, chainMinedBase: null, minedTotalBase: null, headroomBase: null, withinSchedule: null, note: 'RPC unavailable; claims fail closed until supply is readable' }));
   }
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0].trim();
   if (url.startsWith('/api/rwa')) {

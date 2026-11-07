@@ -35,6 +35,14 @@
 - Miner meta `agis-claim-url`: `https://agis-claim.onrender.com/api/claim`
 - Host: Render free (cold start ~50s after idle)
 
+## Mine-pool schedule ceiling (repo claim-server · SW v42)
+Hard invariant the env-tunable daily caps can never break, checked before every mint:
+- **Halving schedule / 85% pool:** cumulative mined + amount ≤ `emittedUntil(now)` (era rate `RATE0 >> era`, ~2y eras, sum < 8.5B pool). Same numbers as Python `mine_emit.emitted_until` (shared vectors `miner/tests/emission_schedule_vectors.json`).
+- **Hard 10B:** on-chain supply + amount ≤ 10,000,000,000 AGIS.
+- **Wipe-safe:** mined total = max(ledger sum of all `day|*`, Solana `getTokenSupply − 1.5B launch`). A lost/wiped ledger cannot reset the ceiling. If supply can't be read → claim fails closed (`supply check unavailable`).
+- **Public audit:** `GET /api/mine/schedule` returns era, rate, emittedUntil, ledger/chain mined, headroom, `withinSchedule`. Anyone can recompute from Solana alone: `supply − 1.5B ≤ emittedUntil(now)`.
+- Status: in `token/scripts` of this repo + tests (fake-RPC E2E). Goes live only when ported to the agis-claim deploy repo and Render redeploys.
+
 ## RWA jobs API v1 (live path)
 
 RWA here = **document verification** (not tokenization). The file is SHA-256 fingerprinted and AES-256-GCM encrypted in the browser; the key never leaves the user. The claim server (`agis-claim.onrender.com`) stores jobs under `./deployments/rwa-jobs/` (`index.json` + `<id>.b64` ciphertext).

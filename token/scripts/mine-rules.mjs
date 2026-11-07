@@ -63,3 +63,49 @@ export function capUnits(units, secs, k) {
   if (units > 2 * max) throw new Error('implausible work (units > 2x tier max)');
   return { units: Math.min(units, max), max, clipped: units > max };
 }
+
+// ---- Mine-pool schedule ceiling (85% pool + halving, wipe-safe via on-chain supply) ----
+// Daily caps are env-tunable; this is the hard invariant they can never break:
+//   (1) cumulative mined <= emittedUntil(now) <= MINE_POOL  (halving schedule, 85% pool)
+//   (2) on-chain supply + amount <= MAX_SUPPLY               (hard 10B mint ceiling)
+// minedTotal = max(ledger sum of every 'YYYY-MM-DD|*' day, on-chain supply - LAUNCH).
+// The chain term means a wiped/lost claim ledger cannot reset the ceiling, and anyone can
+// audit it from Solana alone: getTokenSupply(mint) - LAUNCH <= emittedUntil(now).
+// (Burns lower supply, so the chain term is a floor; the ledger term covers burned AGIS.)
+// Mirrors miner/aegis_miner/mine_emit.py emitted_until + mine_claim.py "exceeds emission schedule".
+export const BASE = 10n ** 9n;
+export const MAX_SUPPLY_BASE = 10_000_000_000n * BASE;
+export const MINE_POOL_BASE = 8_500_000_000n * BASE;
+export const LAUNCH_BASE = 1_500_000_000n * BASE; // 10% team + 5% eco minted at launch (deployments/mainnet-beta.json)
+
+export function emittedUntil(nowSec, genesisSec) {
+  if (!Number.isFinite(nowSec) || !Number.isFinite(genesisSec)) throw new Error('bad time');
+  const el = Math.floor(nowSec) - Math.floor(genesisSec);
+  if (el <= 0) return 0n;
+  const era = Math.floor(el / ERA);
+  let total = 0n;
+  for (let e = 0; e < Math.min(era, 256); e++) total += (RATE0 >> BigInt(e)) * BigInt(ERA);
+  const into = BigInt(el - era * ERA);
+  total += (era < 256 ? RATE0 >> BigInt(era) : 0n) * into;
+  return total < MINE_POOL_BASE ? total : MINE_POOL_BASE;
+}
+
+export function minedFromLedger(ledgerDay) {
+  let s = 0n;
+  for (const [k, v] of Object.entries(ledgerDay || {})) if (k.endsWith('|*')) s += BigInt(v);
+  return s;
+}
+
+// chainSupply: BigInt base units from getTokenSupply (required; caller must fail closed if RPC is down).
+export function scheduleGate({ amount, ledgerMined, chainSupply, nowSec, genesisSec, launch = LAUNCH_BASE }) {
+  if (typeof amount !== 'bigint' || amount <= 0n) throw new Error('bad amount');
+  if (typeof chainSupply !== 'bigint' || chainSupply < 0n) throw new Error('bad chain supply');
+  if (typeof ledgerMined !== 'bigint' || ledgerMined < 0n) throw new Error('bad ledger total');
+  const chainMined = chainSupply > launch ? chainSupply - launch : 0n;
+  const minedTotal = ledgerMined > chainMined ? ledgerMined : chainMined;
+  const allowed = emittedUntil(nowSec, genesisSec);
+  const out = { minedTotal, chainMined, ledgerMined, allowed, headroom: allowed > minedTotal ? allowed - minedTotal : 0n };
+  if (chainSupply + amount > MAX_SUPPLY_BASE) return { ok: false, error: 'exceeds max supply', ...out };
+  if (minedTotal + amount > allowed) return { ok: false, error: 'exceeds emission schedule', ...out };
+  return { ok: true, ...out };
+}
