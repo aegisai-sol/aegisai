@@ -105,3 +105,140 @@ test('parseDeskClaim rejects wrong domain, missing fields, wallet mismatch', () 
   const badMsg = DESK_MSG.replace(W, 'OtherWallet111111111111111111111111111');
   assert.throws(() => S.parseDeskClaim({ wallet: W, msg: badMsg }), /msg wallet does not match/);
 });
+
+// --- Paid PoV-R Web Worker protocol (miner-worker.js + pov-worker-core.js) ---
+function loadWorkerCore() {
+  const src = fs.readFileSync(path.join(here, '../docs/js/pov-worker-core.js'), 'utf8');
+  const self = { __agisSolveTask: null, __agisMineStep: null };
+  // Classic worker script; bind onto a fake self.
+  const fn = new Function('self', 'crypto', 'performance', 'TextEncoder', src + '\n;return self;');
+  const { webcrypto } = require('node:crypto');
+  const perf = { now: () => Number(process.hrtime.bigint()) / 1e6 };
+  return fn(self, webcrypto, perf, TextEncoder);
+}
+
+function loadMinerWorkerProtocol() {
+  // Simulate miner-worker message handler without a real Worker (Node has none for classic importScripts).
+  const core = loadWorkerCore();
+  const out = [];
+  const postMessage = (m) => out.push(m);
+  async function handle(d) {
+    if (!d || typeof d !== 'object') return;
+    if (d.type === 'solve') {
+      try {
+        const a = performance.now();
+        const value = await core.__agisSolveTask(d.task);
+        postMessage({ type: 'answer', i: d.i, value, ms: +(performance.now() - a).toFixed(2) });
+      } catch (err) {
+        postMessage({ type: 'error', i: d.i, error: String(err && err.message || err) });
+      }
+      return;
+    }
+    if (d.type === 'solveBatch') {
+      try {
+        const tasks = d.tasks || [];
+        const answers = [];
+        const a0 = performance.now();
+        for (let i = 0; i < tasks.length; i++) {
+          const a = performance.now();
+          const value = await core.__agisSolveTask(tasks[i]);
+          answers.push({ type: 'answer', i, value, ms: +(performance.now() - a).toFixed(2) });
+        }
+        postMessage({ type: 'batch', answers, ms: +(performance.now() - a0).toFixed(2) });
+      } catch (err) {
+        postMessage({ type: 'error', error: String(err && err.message || err) });
+      }
+    }
+  }
+  return { handle, out, core };
+}
+
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { performance } = globalThis;
+
+test('docs/site miner-worker + mine-worker + pov-worker-core are mirrored', () => {
+  for (const f of ['miner-worker.js', 'mine-worker.js', 'pov-worker-core.js']) {
+    assert.equal(
+      fs.readFileSync(path.join(here, '../site/js', f), 'utf8'),
+      fs.readFileSync(path.join(here, '../docs/js', f), 'utf8'),
+      f,
+    );
+  }
+});
+
+test('miner-worker.js is paid solve protocol (importScripts core; solve + solveBatch)', () => {
+  const src = fs.readFileSync(path.join(here, '../docs/js/miner-worker.js'), 'utf8');
+  assert.match(src, /importScripts\('\.\/pov-worker-core\.js'\)/);
+  assert.match(src, /type === 'solve'/);
+  assert.match(src, /type === 'solveBatch'/);
+  assert.match(src, /type: 'answer'/);
+  assert.match(src, /type: 'batch'/);
+  assert.match(src, /__agisSolveTask/);
+  assert.doesNotMatch(src, /__agisMineStep/); // practice path stays in mine-worker
+  assert.match(src, /Practice-only|practice/i);
+});
+
+test('mine-worker.js is labeled practice-only (not paid claims)', () => {
+  const src = fs.readFileSync(path.join(here, '../docs/js/mine-worker.js'), 'utf8');
+  assert.match(src, /PRACTICE ONLY/);
+  assert.match(src, /practice:\s*true/);
+  assert.match(src, /__agisMineStep/);
+});
+
+test('miner.html hot path uses worker solve, not main-thread P.solveTask', () => {
+  for (const rel of ['../docs/miner.html', '../site/miner.html']) {
+    const html = fs.readFileSync(path.join(here, rel), 'utf8');
+    assert.equal(html.includes('P.solveTask'), false, rel + ' still calls P.solveTask');
+    assert.match(html, /solveInWorker/);
+    assert.match(html, /type:'solve'/);
+    assert.match(html, /new Worker\('js\/miner-worker\.js'\)/);
+  }
+});
+
+test('worker-core solveTask matches pov-solver on mul/hash/prime', async () => {
+  const core = loadWorkerCore();
+  const samples = [
+    '12*34=408',
+    '12*34=409',
+    'prime(97)',
+    'prime(100)',
+    'sha256(agis:000000000001)^00',
+  ];
+  for (const t of samples) {
+    const a = await S.solveTask(t);
+    const b = await core.__agisSolveTask(t);
+    assert.equal(b, a, t);
+  }
+  await assert.rejects(() => core.__agisSolveTask('nope'), /unknown task/);
+});
+
+test('solveBatch protocol parity with encodeAnswers from main solver', async () => {
+  const { handle, out, core } = loadMinerWorkerProtocol();
+  const tasks = ['7*8=56', '7*8=55', 'prime(2)', 'prime(4)', 'sha256(agis:abcdef012345)^ab'];
+  // Fix last hash to a known-false or known-true via solver
+  const real = [];
+  for (const t of tasks) real.push(await S.solveTask(t));
+  await handle({ type: 'solveBatch', tasks });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].type, 'batch');
+  assert.equal(out[0].answers.length, tasks.length);
+  const vals = out[0].answers.map((a) => a.value);
+  assert.deepEqual(vals, real);
+  assert.equal(S.encodeAnswers(vals), S.encodeAnswers(real));
+  // single solve message
+  out.length = 0;
+  await handle({ type: 'solve', i: 2, task: tasks[2] });
+  assert.equal(out[0].type, 'answer');
+  assert.equal(out[0].i, 2);
+  assert.equal(out[0].value, real[2]);
+  // unknown → error
+  out.length = 0;
+  await handle({ type: 'solve', i: 9, task: 'garbage' });
+  assert.equal(out[0].type, 'error');
+  assert.equal(out[0].i, 9);
+  // practice step still requires wallet and marks practice
+  await assert.rejects(() => core.__agisMineStep(null), /wallet required/);
+  const rec = await core.__agisMineStep(W);
+  assert.equal(rec.practice, true);
+});

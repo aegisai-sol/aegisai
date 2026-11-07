@@ -11,7 +11,7 @@ async function solveTask(text) {
   if ((m = /^prime\((\d+)\)$/.exec(text))) return isPrime(Number(m[1]));
   throw new Error('unknown task');
 }
-// Deterministic local practice tasks (not a paid batch). Paid claims use miner.html → pov-solver + /api/mine/tasks.
+// PRACTICE ONLY — deterministic local tasks. Never paid. Paid claims: miner.html → miner-worker solve → /api/claim.
 function practiceTask(seed) {
   const kind = seed % 3;
   if (kind === 0) { const a = 100 + (seed % 900), b = 100 + ((seed * 7) % 900); return `${a}*${b}=${a * b}`; }

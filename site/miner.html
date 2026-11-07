@@ -40,7 +40,7 @@ caps: 25 AGIS/job · 100 AGIS/wallet/day · 100k AGIS/network/day</pre></div><p 
 import * as P from './js/pov-solver.js';import * as T from './js/tokenomics.js';
 const $=i=>document.getElementById(i),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const CLAIM_URL=(document.querySelector('meta[name=agis-claim-url]')||{}).content||'',API=CLAIM_URL.replace(/\/api\/claim$/,''),BATCH_N=120,KEY='agisPovBatch';
-let run=0,id=null,startAt=0,hist=Array(60).fill(0),sec=0,B$=null,busy=0,lastStep=0,claiming=0,liveActive=1,liveDifBps=T.ONE_X_BPS;
+let run=0,id=null,startAt=0,hist=Array(60).fill(0),sec=0,B$=null,busy=0,lastStep=0,claiming=0,liveActive=1,liveDifBps=T.ONE_X_BPS,solveWait=null;
 const B=T.bench(),tier=T.TIERS[B.tier];$('dev').textContent=tier.label+' ×'+tier.k;$('dvT').textContent=tier.label;$('dvC').textContent=B.cores;$('dvB').textContent=B.ms.toFixed(1)+' ms';$('dvK').textContent='×'+tier.k;
 const perUnit=()=>T.unitReward(tier.k,liveActive),estUnits=c=>Math.floor(c*Math.min(tier.k,2));
 function save(){B$?localStorage.setItem(KEY,JSON.stringify(B$)):localStorage.removeItem(KEY)}
@@ -51,29 +51,30 @@ function note(h,tone='slate'){const c={slate:'text-slate-300',ok:'text-emerald-3
 function prog(){const n=B$?B$.tasks.length:0,i=B$?B$.answers.length:0;$('pbt').textContent=B$?`Work batch ${i}/${n}`:'No work batch yet';$('pb').style.width=(n?i/n*100:0)+'%';
 $('un').textContent=(B$?estUnits(i)*perUnit():0).toFixed(3);$('cl').textContent=(B$&&i===n?estUnits(n)*perUnit():0).toFixed(2)}
 document.addEventListener('agis:wallet',e=>{id=e.detail;$('who').textContent=id?id.slice(0,4)+'…'+id.slice(-4):'not connected';if(B$&&id&&B$.wallet!==id){stop('IDLE');B$=null;save();prog();note('Wallet changed — the old work batch belonged to another wallet and was dropped.','warn')}});
-function stop(label){run=0;Wk.postMessage('stop');wl&&wl.release();wl=null;$('go').textContent='▶ Start';setState(0,label||'IDLE')}
+function stop(label){run=0;Wk.postMessage('stop');if(solveWait){try{solveWait.reject(new Error('stopped'))}catch(_){}solveWait=null}wl&&wl.release();wl=null;$('go').textContent='▶ Start';setState(0,label||'IDLE')}
 async function getBatch(){setState(1,'GETTING TASKS');note('Asking the claim server for a work batch bound to your wallet… (first request can take up to a minute while the server wakes up)');
 const j=await P.fetchBatch(API,id,BATCH_N);B$={wallet:id,batchId:j.batchId,tasks:j.tasks,issuedAt:j.issuedAt,gotAt:Date.now(),answers:[]};save();prog();
 log(`<span class="text-cyan">NEW BATCH</span> ${j.tasks.length} verification tasks · id ${esc(j.batchId.slice(-8))}`)}
+function solveInWorker(i,task){return new Promise((resolve,reject)=>{if(solveWait)return reject(new Error('solver busy'));solveWait={i,resolve,reject};Wk.postMessage({type:'solve',i,task})})}
 async function step(){const now=Date.now();if(!run||busy||!B$||now-lastStep<1000)return;lastStep=now;busy=1;try{const i=B$.answers.length,t=B$.tasks[i];if(t===undefined)return;
-const a=performance.now(),v=await P.solveTask(t),ms=(performance.now()-a).toFixed(2);B$.answers.push(v);save();sec++;prog();
-log(`<span class="text-emerald-400">✓</span> <span class="text-slate-500">${new Date().toISOString().slice(11,19)}</span> ${P.taskKind(t)} <span class="text-cyan">${esc(t)}</span> → <b>${v?'true':'false'}</b> <span class="text-slate-600">${ms} ms</span>`);
-if(B$.answers.length===B$.tasks.length){stop('BATCH DONE');note(`Batch finished: ${B$.tasks.length} tasks checked on this device. Tap <b>Claim</b> to sign with your wallet — the server grades your answers (90% needed).`,'ok')}}
-catch(e){stop('ERROR');note('Solver error: '+esc(e.message)+'. This batch cannot be completed honestly; start again for a new one.','bad');B$=null;save();prog()}finally{busy=0}}
+const r=await solveInWorker(i,t),v=r.value,ms=r.ms;B$.answers.push(v);save();sec++;prog();
+log(`<span class="text-emerald-400">✓</span> <span class="text-slate-500">${new Date().toISOString().slice(11,19)}</span> ${P.taskKind(t)} <span class="text-cyan">${esc(t)}</span> → <b>${v?'true':'false'}</b> <span class="text-slate-600">${ms} ms</span> <span class="text-slate-700">worker</span>`);
+if(B$.answers.length===B$.tasks.length){stop('BATCH DONE');note(`Batch finished: ${B$.tasks.length} tasks checked on this device. Tap <b>Claim</b> to sign with your wallet — the server grades your answers (90% needed).`,'ok')}
+catch(e){if(String(e&&e.message)==='stopped')return;stop('ERROR');note('Solver error: '+esc(e.message)+'. This batch cannot be completed honestly; start again for a new one.','bad');B$=null;save();prog()}finally{busy=0}}
 function tickUI(){hist.push(sec);hist.shift();sec=0;if(document.hidden)return;$('tpm').textContent=hist.reduce((a,b)=>a+b,0);
 $('dif').textContent=(liveDifBps/T.ONE_X_BPS).toFixed(2);$('dif').title=liveActive+' wallet'+(liveActive===1?'':'s')+' claimed today (full until '+T.FREE_WALLETS+')';$('era').textContent='Era '+T.era()+' · '+Math.ceil((T.nextHalving()-Date.now())/864e5)+'d';$('aph').textContent=(run?Math.min(T.DAILY_CAP,3600*Math.min(tier.k,2)*perUnit()):0).toFixed(3);
 if(startAt){const s=Math.floor((Date.now()-startAt)/1e3);$('up').textContent=[s/3600,s/60%60,s%60].map(x=>String(Math.floor(x)).padStart(2,'0')).join(':')}
 const c=$('ch'),x=c.getContext('2d'),W=c.width=c.clientWidth,H=c.height,m=Math.max(4,...hist);x.clearRect(0,0,W,H);const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,'rgba(34,211,238,.45)');g.addColorStop(1,'rgba(34,211,238,0)');
 x.beginPath();x.moveTo(0,H);hist.forEach((v,i)=>x.lineTo(i/59*W,H-v/m*(H-8)));x.lineTo(W,H);x.fillStyle=g;x.fill();x.beginPath();hist.forEach((v,i)=>x[i?'lineTo':'moveTo'](i/59*W,H-v/m*(H-8)));x.strokeStyle='#22d3ee';x.lineWidth=1.5;x.stroke();
 const J=T.jobs.all().slice(-5).reverse();$('jq').innerHTML=J.length?J.map(j=>`<div class="bg-deep/60 rounded p-2"><div class="flex font-mono"><span class="text-cyan">${esc(j.id)}</span><span class="ml-auto text-gold">×${j.mult}</span></div><div class="text-slate-500 mt-1">${esc(j.kind)} · ${(j.bytes/1e3).toFixed(0)} KB</div></div>`).join(''):'<div class="text-slate-500">No RWA jobs — mining general tasks.</div>'}
-const Wk=new Worker('js/miner-worker.js');Wk.onmessage=()=>run&&step();setInterval(tickUI,1000);let wl=null;
+const Wk=new Worker('js/miner-worker.js');Wk.onmessage=e=>{const d=e.data;if(d==='tick'){run&&step();return}if(!d||typeof d!=='object')return;if(d.type==='answer'&&solveWait&&d.i===solveWait.i){const w=solveWait;solveWait=null;w.resolve(d)}else if(d.type==='error'&&solveWait&&(d.i===undefined||d.i===solveWait.i)){const w=solveWait;solveWait=null;w.reject(new Error(d.error||'worker error'))}};setInterval(tickUI,1000);let wl=null;
 async function lock(){try{if('wakeLock'in navigator&&document.visibilityState==='visible')wl=await navigator.wakeLock.request('screen')}catch(e){}}
 document.addEventListener('visibilitychange',()=>{if(run&&document.visibilityState==='visible')lock()});
 if('serviceWorker'in navigator){navigator.serviceWorker.addEventListener('message',e=>{if(e.data&&e.data.type==='tick'&&run)step()});setInterval(()=>navigator.serviceWorker.controller&&navigator.serviceWorker.controller.postMessage({type:'heartbeat'}),20000);navigator.serviceWorker.ready.then(r=>r.periodicSync&&r.periodicSync.register('agis-mine',{minInterval:9e5}).catch(()=>{}))}
 let dp=null;addEventListener('beforeinstallprompt',e=>{e.preventDefault();dp=e;$('inst').classList.remove('hidden')});$('inst').onclick=()=>dp&&dp.prompt();
 $('go').onclick=async()=>{if(run)return stop('PAUSED');if(!id)return note('Connect your Phantom wallet first (top right). Rewards are paid to that wallet.','warn');
 if(!API)return note('Claim server address missing on this page.','bad');if(B$&&B$.answers.length===B$.tasks.length)return note('This batch is finished. Tap <b>Claim</b> first, then start a new batch.','warn');
-$('go').disabled=true;try{if(!B$)await getBatch();run=1;startAt=startAt||Date.now();Wk.postMessage('start');lock();$('go').textContent='■ Stop';setState(1,'MINING');note('Solving real verification tasks on this device (multiply, SHA-256, prime checks) at about 1 per second. Keep this tab open.')}
+$('go').disabled=true;try{if(!B$)await getBatch();run=1;startAt=startAt||Date.now();Wk.postMessage('start');lock();$('go').textContent='■ Stop';setState(1,'MINING');note('Solving real verification tasks in a Web Worker (multiply, SHA-256, prime checks) at about 1 per second. Keep this tab open.')}
 catch(e){setState(0,'OFFLINE');note('Claim server unreachable right now ('+esc(e.message)+'). Nothing is counted while offline — please try Start again in a minute.','bad')}finally{$('go').disabled=false}};
 function showResult(j){const R=$('res');R.classList.remove('hidden');if(j.ok){const pc=j.pov?Math.round(j.pov.correct/j.pov.n*100):null;$('acc').textContent=pc!=null?pc+'%':'–';
 if(Number.isFinite(j.difficultyBps))liveDifBps=j.difficultyBps;if(Number.isFinite(j.activeWallets))liveActive=j.activeWallets;
