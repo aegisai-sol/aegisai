@@ -242,3 +242,57 @@ test('solveBatch protocol parity with encodeAnswers from main solver', async () 
   const rec = await core.__agisMineStep(W);
   assert.equal(rec.practice, true);
 });
+
+// --- Auto-offer Phantom claim after paid browser batch finishes ---
+test('shouldAutoOfferClaim: yes only once for finished wallet-matched batch', () => {
+  const batch = { wallet: W, tasks: ['1*1=1', '2*2=4'], answers: [true, true] };
+  assert.equal(S.shouldAutoOfferClaim({ batch, walletId: W, claiming: 0, deskClaiming: 0 }), true);
+  batch.autoClaimOffered = 1;
+  assert.equal(S.shouldAutoOfferClaim({ batch, walletId: W, claiming: 0, deskClaiming: 0 }), false);
+});
+
+test('shouldAutoOfferClaim: guards wallet/claiming/incomplete/desk', () => {
+  const done = { wallet: W, tasks: ['a'], answers: [true] };
+  assert.equal(S.shouldAutoOfferClaim({ batch: done, walletId: W, claiming: 1, deskClaiming: 0 }), false);
+  assert.equal(S.shouldAutoOfferClaim({ batch: done, walletId: W, claiming: 0, deskClaiming: 1 }), false);
+  assert.equal(S.shouldAutoOfferClaim({ batch: done, walletId: null, claiming: 0, deskClaiming: 0 }), false);
+  assert.equal(S.shouldAutoOfferClaim({ batch: done, walletId: 'OtherWallet111111111111111111111111111', claiming: 0, deskClaiming: 0 }), false);
+  assert.equal(S.shouldAutoOfferClaim({ batch: null, walletId: W, claiming: 0, deskClaiming: 0 }), false);
+  assert.equal(S.shouldAutoOfferClaim({ batch: { wallet: W, tasks: ['a'], answers: [] }, walletId: W, claiming: 0, deskClaiming: 0 }), false);
+  assert.equal(S.shouldAutoOfferClaim({ batch: { wallet: W, tasks: [], answers: [] }, walletId: W, claiming: 0, deskClaiming: 0 }), false);
+});
+
+test('miner.html: shared claimFinishedBatch + auto-offer after batch (not desk)', () => {
+  for (const rel of ['../docs/miner.html', '../site/miner.html']) {
+    const html = fs.readFileSync(path.join(here, rel), 'utf8');
+    assert.match(html, /async function claimFinishedBatch\(/);
+    assert.match(html, /\$\('claim'\)\.onclick=\(\)=>claimFinishedBatch\(\)/);
+    assert.match(html, /shouldAutoOfferClaim/);
+    assert.match(html, /autoClaimOffered/);
+    assert.match(html, /claimFinishedBatch\(\)/);
+    // desk path must not call claimFinishedBatch / shouldAutoOfferClaim
+    const deskIdx = html.indexOf("deskClaimBtn");
+    assert.ok(deskIdx > 0);
+    const deskBlock = html.slice(deskIdx, deskIdx + 1200);
+    assert.doesNotMatch(deskBlock, /shouldAutoOfferClaim/);
+    assert.doesNotMatch(deskBlock, /claimFinishedBatch/);
+    // restore of finished batch still asks for manual Claim (no auto on load)
+    assert.match(html, /You have a finished batch\. Tap <b>Claim<\/b>/);
+  }
+});
+
+test('docs/site miner.html + pov-solver.js + sw.js mirrored; SW is agis-v41', () => {
+  assert.equal(
+    fs.readFileSync(path.join(here, '../docs/miner.html'), 'utf8'),
+    fs.readFileSync(path.join(here, '../site/miner.html'), 'utf8'),
+  );
+  assert.equal(
+    fs.readFileSync(path.join(here, '../docs/js/pov-solver.js'), 'utf8'),
+    fs.readFileSync(path.join(here, '../site/js/pov-solver.js'), 'utf8'),
+  );
+  for (const rel of ['../docs/sw.js', '../site/sw.js']) {
+    const sw = fs.readFileSync(path.join(here, rel), 'utf8');
+    assert.match(sw, /const C='agis-v41'/);
+    assert.doesNotMatch(sw, /agis-v40/);
+  }
+});

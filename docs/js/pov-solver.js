@@ -76,3 +76,15 @@ export function parseDeskClaim(raw, connectedWallet) {
   }
   return { wallet, msg };
 }
+
+// Pure guard: auto-offer Phantom claim once when a paid browser batch finishes.
+// Never for desk paste; never while a claim is in flight; wallet must match batch.
+export function shouldAutoOfferClaim({ batch, walletId, claiming, deskClaiming }) {
+  if (claiming || deskClaiming) return false;
+  if (!walletId || !batch) return false;
+  if (batch.wallet !== walletId) return false;
+  if (!Array.isArray(batch.tasks) || !Array.isArray(batch.answers)) return false;
+  if (batch.tasks.length === 0 || batch.answers.length !== batch.tasks.length) return false;
+  if (batch.autoClaimOffered) return false;
+  return true;
+}

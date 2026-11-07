@@ -40,7 +40,7 @@ caps: 25 AGIS/job · 100 AGIS/wallet/day · 100k AGIS/network/day</pre></div><p 
 import * as P from './js/pov-solver.js';import * as T from './js/tokenomics.js';
 const $=i=>document.getElementById(i),esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const CLAIM_URL=(document.querySelector('meta[name=agis-claim-url]')||{}).content||'',API=CLAIM_URL.replace(/\/api\/claim$/,''),BATCH_N=120,KEY='agisPovBatch';
-let run=0,id=null,startAt=0,hist=Array(60).fill(0),sec=0,B$=null,busy=0,lastStep=0,claiming=0,liveActive=1,liveDifBps=T.ONE_X_BPS,solveWait=null;
+let run=0,id=null,startAt=0,hist=Array(60).fill(0),sec=0,B$=null,busy=0,lastStep=0,claiming=0,deskClaiming=0,liveActive=1,liveDifBps=T.ONE_X_BPS,solveWait=null;
 const B=T.bench(),tier=T.TIERS[B.tier];$('dev').textContent=tier.label+' ×'+tier.k;$('dvT').textContent=tier.label;$('dvC').textContent=B.cores;$('dvB').textContent=B.ms.toFixed(1)+' ms';$('dvK').textContent='×'+tier.k;
 const perUnit=()=>T.unitReward(tier.k,liveActive),estUnits=c=>Math.floor(c*Math.min(tier.k,2));
 function save(){B$?localStorage.setItem(KEY,JSON.stringify(B$)):localStorage.removeItem(KEY)}
@@ -59,7 +59,7 @@ function solveInWorker(i,task){return new Promise((resolve,reject)=>{if(solveWai
 async function step(){const now=Date.now();if(!run||busy||!B$||now-lastStep<1000)return;lastStep=now;busy=1;try{const i=B$.answers.length,t=B$.tasks[i];if(t===undefined)return;
 const r=await solveInWorker(i,t),v=r.value,ms=r.ms;B$.answers.push(v);save();sec++;prog();
 log(`<span class="text-emerald-400">✓</span> <span class="text-slate-500">${new Date().toISOString().slice(11,19)}</span> ${P.taskKind(t)} <span class="text-cyan">${esc(t)}</span> → <b>${v?'true':'false'}</b> <span class="text-slate-600">${ms} ms</span> <span class="text-slate-700">worker</span>`);
-if(B$.answers.length===B$.tasks.length){stop('BATCH DONE');note(`Batch finished: ${B$.tasks.length} tasks checked on this device. Tap <b>Claim</b> to sign with your wallet — the server grades your answers (90% needed).`,'ok')}
+if(B$.answers.length===B$.tasks.length){stop('BATCH DONE');note(`Batch finished: ${B$.tasks.length} tasks checked on this device. Opening wallet to claim — approve the message (or cancel and tap Claim later).`,'ok');if(P.shouldAutoOfferClaim({batch:B$,walletId:id,claiming,deskClaiming})){B$.autoClaimOffered=1;save();claimFinishedBatch()}}
 catch(e){if(String(e&&e.message)==='stopped')return;stop('ERROR');note('Solver error: '+esc(e.message)+'. This batch cannot be completed honestly; start again for a new one.','bad');B$=null;save();prog()}finally{busy=0}}
 function tickUI(){hist.push(sec);hist.shift();sec=0;if(document.hidden)return;$('tpm').textContent=hist.reduce((a,b)=>a+b,0);
 $('dif').textContent=(liveDifBps/T.ONE_X_BPS).toFixed(2);$('dif').title=liveActive+' wallet'+(liveActive===1?'':'s')+' claimed today (full until '+T.FREE_WALLETS+')';$('era').textContent='Era '+T.era()+' · '+Math.ceil((T.nextHalving()-Date.now())/864e5)+'d';$('aph').textContent=(run?Math.min(T.DAILY_CAP,3600*Math.min(tier.k,2)*perUnit()):0).toFixed(3);
@@ -81,15 +81,16 @@ if(Number.isFinite(j.difficultyBps))liveDifBps=j.difficultyBps;if(Number.isFinit
 R.innerHTML=`<div class="text-emerald-300 font-bold">Claim accepted ✓</div><div class="grid grid-cols-3 gap-2 mt-2 font-mono"><div><div class="k">Score</div>${j.pov?j.pov.correct+'/'+j.pov.n:'–'}</div><div><div class="k">Units</div>${j.units}${j.clipped?' (capped)':''}</div><div><div class="k">AGIS</div><span class="text-gold">${Number(j.amount).toFixed(4)}</span></div></div><div class="text-slate-400 mt-2">Tier ${esc(j.tier)}${j.downgraded?' (server lowered your tier)':''} · D ${(liveDifBps/T.ONE_X_BPS).toFixed(2)} · ${liveActive} wallet${liveActive===1?'':'s'} today · <a class="underline text-cyan" target="_blank" rel="noopener" href="${esc(j.explorer||'')}">View on Solscan</a></div>`}
 else R.innerHTML=`<div class="text-rose-300 font-bold">Claim not paid</div><div class="text-slate-300 mt-1">${esc(j.error||'unknown error')}</div>`}
 const FINAL=/work check failed|batch already claimed|batch expired|not issued|bad batch|bad answers|replay/;
-$('claim').onclick=async()=>{if(claiming)return;if(!id)return note('Connect your Phantom wallet first.','warn');if(!B$)return note('Nothing to claim yet — tap Start to get a work batch.','warn');
+async function claimFinishedBatch(){if(claiming)return;if(!id)return note('Connect your Phantom wallet first.','warn');if(!B$)return note('Nothing to claim yet — tap Start to get a work batch.','warn');
 if(B$.answers.length<B$.tasks.length)return note(`Finish the work batch first (${B$.answers.length}/${B$.tasks.length} done).`,'warn');
+if(B$.wallet&&B$.wallet!==id)return note('Connected wallet does not match this batch.','warn');
 claiming=1;$('claim').disabled=true;try{const w=P.workWindow(B$.issuedAt,Date.now()-B$.gotAt),m=P.buildClaimMsg({wallet:id,batchId:B$.batchId,answersHex:P.encodeAnswers(B$.answers),...w,uuid:crypto.randomUUID(),tier:B.tier,cores:B.cores,benchMs:Math.max(1,Math.round(B.ms))});
 note('Please approve the message in your wallet. It only signs text — no transaction, no fee.');let sig;try{sig=await window.agisSign(m)}catch(e){return note('Signature cancelled — your finished batch is kept. Tap Claim again when ready.','warn')}
 setState(1,'GRADING');note('Sending your answers to the claim server for grading…');let j;try{j=await P.postClaim(API,{wallet:id,msg:m,sig})}catch(e){setState(0,'BATCH DONE');return note('Claim server unreachable ('+esc(e.message)+'). Your finished batch is kept — try Claim again in a minute.','bad')}
 showResult(j);log(`<span class="${j.ok?'text-gold':'text-rose-400'}">CLAIM ${j.ok?'paid '+Number(j.amount).toFixed(4)+' AGIS · '+j.pov?.correct+'/'+j.pov?.n+' correct':'refused: '+esc(j.error)}</span>`);
 if(j.ok||FINAL.test(j.error||'')){B$=null;save();prog();setState(0,'IDLE');note(j.ok?'Done. Tap Start for the next batch.':'This batch is closed. Tap Start for a new one.',j.ok?'ok':'warn')}else{setState(0,'BATCH DONE');note('Batch kept — you can retry Claim later.','warn')}}
-finally{claiming=0;$('claim').disabled=false}};
-let deskClaiming=0;
+finally{claiming=0;$('claim').disabled=false}}
+$('claim').onclick=()=>claimFinishedBatch();
 $('deskClaimBtn').onclick=async()=>{if(deskClaiming)return;if(!id)return note('Connect your Phantom wallet first (same wallet as the desk claim).','warn');if(!API)return note('Claim server address missing on this page.','bad');
 let parsed;try{parsed=P.parseDeskClaim($('deskClaim').value,id)}catch(e){return note('Desk claim: '+esc(e.message),'bad')}
 deskClaiming=1;$('deskClaimBtn').disabled=true;$('deskClaimHint').textContent='';
