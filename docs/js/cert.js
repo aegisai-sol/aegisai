@@ -3,7 +3,7 @@ const BASE='https://aegisai-sol.github.io/aegisai/proof.html';
 let qrP;const loadQR=()=>qrP||(qrP=new Promise((ok,no)=>{if(window.QRCode)return ok(window.QRCode);const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';s.onload=()=>ok(window.QRCode);s.onerror=()=>no(new Error('QR library failed to load'));document.head.appendChild(s)}));
 export const proofUrl=j=>(j.id?`${BASE}?id=${j.id}`:`${BASE}?fp=${j.fingerprint}`)+(j.receiptTx?`&tx=${j.receiptTx}`:'');
 const esc=t=>String(t??'').replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
-const st=s=>s==='verified'?'VERIFIED · INTACT':s==='failed'?'FAILED':s==='local'?'LOCAL ONLY':'WAITING FOR MINERS';
+const st=s=>s==='sealed'?'SEALED ON SOLANA':s==='verified'?'VERIFIED · INTACT':s==='failed'?'FAILED':s==='local'?'LOCAL ONLY':'WAITING FOR MINERS';
 async function drawCert(j){const Q=await loadQR(),url=proofUrl(j),W=1000,Hh=620,c=document.createElement('canvas');c.width=W;c.height=Hh;const g=c.getContext('2d');
 g.fillStyle='#ffffff';g.fillRect(0,0,W,Hh);g.strokeStyle='#0a1628';g.lineWidth=6;g.strokeRect(14,14,W-28,Hh-28);g.strokeStyle='#f5c451';g.lineWidth=2;g.strokeRect(26,26,W-52,Hh-52);
 g.fillStyle='#0a1628';g.font='bold 34px system-ui,sans-serif';g.fillText('AGIS Seal Certificate',56,90);g.font='18px system-ui,sans-serif';g.fillStyle='#475569';g.fillText('Сертификат за печат · AegisAI network · Solana',56,120);

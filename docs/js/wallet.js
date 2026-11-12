@@ -16,6 +16,8 @@ export const wallet = { pubkey: null, name: null, provider: null };
 window.agisWallet = wallet;
 const CSS = '.agis-wallet-btn{display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid rgba(34,211,238,.25);color:#94a3b8;border-radius:999px;font:500 11.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:6px 11px;max-width:96px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:color .15s,border-color .15s,background .15s}.agis-wallet-btn:hover,.agis-wallet-btn:focus-visible{color:#22d3ee;border-color:rgba(34,211,238,.6);outline:none}.agis-wallet-btn[data-state=connected]{color:#e2e8f0;border-color:rgba(34,211,238,.45);background:rgba(34,211,238,.06);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}@media(min-width:768px){.agis-wallet-btn{max-width:140px;font-size:12px}}';
 function ensureCss() {
+  // Phone fit: header = logo + wallet chip + EN/BG; X/Telegram stay in the footer below 480px (no horizontal scroll).
+  if (!document.getElementById('agis-nav-fit')) { const f = document.createElement('style'); f.id = 'agis-nav-fit'; f.textContent = '@media(max-width:480px){nav .agis-social{display:none!important}}'; document.head.appendChild(f); }
   if (document.getElementById('agis-wallet-css')) return;
   const s = document.createElement('style'); s.id = 'agis-wallet-css'; s.textContent = CSS; document.head.appendChild(s);
 }
@@ -58,6 +60,16 @@ export async function signText(text) {
   return btoa(String.fromCharCode(...sig));
 }
 window.agisSign = signText;
+// Explicit connect for in-page buttons (Seal step 2). Returns pubkey or null; opens Phantom when no wallet is injected.
+export const hasWallet = () => providers().length > 0;
+export async function connect() {
+  if (wallet.pubkey) return wallet.pubkey;
+  const list = providers();
+  if (!list.length) { window.open('https://phantom.app/ul/browse/' + encodeURIComponent(location.href) + '?ref=' + encodeURIComponent(location.origin), '_blank'); return null; }
+  const x = await pick(list); if (!x) return null;
+  await connectWith(x); render(); return wallet.pubkey;
+}
+window.agisConnect = connect;
 async function toggle() {
   if (wallet.pubkey) { try { await wallet.provider.disconnect(); } catch {} wallet.pubkey = null; return render(); }
   const list = providers();

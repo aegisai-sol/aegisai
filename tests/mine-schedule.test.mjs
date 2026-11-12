@@ -110,7 +110,7 @@ test('every sched.* key exists in EN and BG; docs/site mirrors identical', () =>
     assert.equal(fs.readFileSync(new URL('../site/' + f, import.meta.url), 'utf8'), fs.readFileSync(new URL('../docs/' + f, import.meta.url), 'utf8'), f);
   const html = fs.readFileSync(new URL('../docs/miner.html', import.meta.url), 'utf8');
   assert.ok(html.includes('id="schedBody"') && html.includes('./js/mine-schedule.js'));
-  assert.match(fs.readFileSync(new URL('../docs/sw.js', import.meta.url), 'utf8'), /agis-v44/);
+  assert.match(fs.readFileSync(new URL('../docs/sw.js', import.meta.url), 'utf8'), /agis-v45/);
 });
 
 test('every inline <script type=module> on Mine/Token/RWA pages is valid JS (regression: 2a5ef64 broke miner.html with a missing brace)', async () => {
