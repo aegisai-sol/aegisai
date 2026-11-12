@@ -281,7 +281,7 @@ test('miner.html: shared claimFinishedBatch + auto-offer after batch (not desk)'
   }
 });
 
-test('docs/site miner.html + pov-solver.js + sw.js mirrored; SW is agis-v45', () => {
+test('docs/site miner.html + pov-solver.js + sw.js mirrored; SW is agis-v46', () => {
   assert.equal(
     fs.readFileSync(path.join(here, '../docs/miner.html'), 'utf8'),
     fs.readFileSync(path.join(here, '../site/miner.html'), 'utf8'),
@@ -292,7 +292,7 @@ test('docs/site miner.html + pov-solver.js + sw.js mirrored; SW is agis-v45', ()
   );
   for (const rel of ['../docs/sw.js', '../site/sw.js']) {
     const sw = fs.readFileSync(path.join(here, rel), 'utf8');
-    assert.match(sw, /const C='agis-v45'/);
+    assert.match(sw, /const C='agis-v46'/);
     assert.doesNotMatch(sw, /agis-v40/);
   }
 });

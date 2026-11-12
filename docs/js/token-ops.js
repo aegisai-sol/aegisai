@@ -5,7 +5,7 @@ export const STAKE_VAULT='6gXafzpPUShAf5Voy7NvQHDw6uGEQ7K9UhF96eG5mhFQ';        
 export const STAKE_VAULT_ATA='DhFNmnZs9TzhqLrxLWHd2uXZy3stg8dV7tMSicSX3cWJ';       // its AGIS token account
 export const LOCK_DAYS=7;
 const TOKEN='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', ATA_PROG='ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', MEMO='MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
-export const RPCS=['https://solana.leorpc.com/?api_key=FREE','https://solana-rpc.publicnode.com','https://api.mainnet-beta.solana.com'];
+export const RPCS=['https://solana-rpc.publicnode.com','https://public.rpc.solanavibestation.com','https://api.mainnet-beta.solana.com','https://solana.leorpc.com/?api_key=FREE']; // publicnode = fast but no archive; solanavibestation = browser-CORS archive + address history
 // amount string -> base units BigInt (exact, no float)
 export function toBase(s){s=String(s).trim();if(!/^\d+(\.\d{1,9})?$/.test(s))throw new Error('Enter an amount like 10 or 0.5');const [i,f='']=s.split('.');const v=BigInt(i)*10n**9n+BigInt((f+'000000000').slice(0,9));if(v<=0n)throw new Error('Amount must be > 0');return v}
 export const fromBase=v=>{v=BigInt(v);const f=(v%10n**9n).toString().padStart(9,'0').replace(/0+$/,'');return (v/10n**9n).toString()+(f?'.'+f:'')};

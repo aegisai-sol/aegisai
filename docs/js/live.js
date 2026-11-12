@@ -1,6 +1,6 @@
 // Live AGIS stats from Solana mainnet RPC (getTokenSupply). Burn = total ever minted − current supply (needs mint log; 0 until burns are recorded).
 export const MINT='GhSiU95vtKwn7FBAW1u5krxYP2PnpFPotb1LJFZkbzhW';
-export const RPCS=['https://solana.leorpc.com/?api_key=FREE','https://solana-rpc.publicnode.com','https://api.mainnet-beta.solana.com'];
+export const RPCS=['https://solana-rpc.publicnode.com','https://public.rpc.solanavibestation.com','https://api.mainnet-beta.solana.com','https://solana.leorpc.com/?api_key=FREE']; // publicnode = fast but no archive; solanavibestation = browser-CORS archive + address history
 export const CLAIM_API='https://agis-claim.onrender.com';
 export const ALLOC_PREMINT=Number(localStorage.agisPremint||1.5e9); // team 10% + eco 5% pre-minted = 1.5B (on-chain supply at launch)
 const abortMs=ms=>{try{return AbortSignal.timeout(ms)}catch(e){const c=new AbortController();setTimeout(()=>c.abort(),ms);return c.signal}};
