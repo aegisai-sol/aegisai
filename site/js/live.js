@@ -4,7 +4,13 @@ export const RPCS=['https://solana.leorpc.com/?api_key=FREE','https://solana-rpc
 export const CLAIM_API='https://agis-claim.onrender.com';
 export const ALLOC_PREMINT=Number(localStorage.agisPremint||1.5e9); // team 10% + eco 5% pre-minted = 1.5B (on-chain supply at launch)
 const abortMs=ms=>{try{return AbortSignal.timeout(ms)}catch(e){const c=new AbortController();setTimeout(()=>c.abort(),ms);return c.signal}};
-export async function rpc(method,params){for(const u of RPCS){try{const t=performance.now(),r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:abortMs(8000)});if(!r.ok)continue;const j=await r.json();if(j.error)continue;if(j.result!==undefined)return{res:j.result,ms:Math.round(performance.now()-t),rpc:u}}catch(e){}}throw new Error('rpc down')}
+// Multi-RPC read. Pruned/partial endpoints answer old history with null / [] — treat that as "try the next endpoint"
+// so a seal is never reported missing just because one free RPC has no archive (L2 multi-RPC reads).
+export const EMPTY_TRY_NEXT={getTransaction:r=>r===null,getSignaturesForAddress:r=>Array.isArray(r)&&r.length===0};
+async function one(u,method,params,ms){const t=performance.now(),r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:abortMs(ms)});if(!r.ok)throw new Error('http '+r.status);const j=await r.json();if(j.error||j.result===undefined)throw new Error('rpc error');return{res:j.result,ms:Math.round(performance.now()-t),rpc:u}}
+// History reads: ask every endpoint in parallel (archive nodes can take 10-15 s), first non-empty answer wins.
+function rpcAny(method,params){const empty=EMPTY_TRY_NEXT[method];return new Promise((ok,no)=>{let left=RPCS.length,last=null;for(const u of RPCS)one(u,method,params,25000).then(o=>{if(!empty(o.res))ok(o);else last=last||o}).catch(()=>{}).finally(()=>{if(--left===0)last?ok(last):no(new Error('rpc down'))})})}
+export async function rpc(method,params){if(EMPTY_TRY_NEXT[method])return rpcAny(method,params);for(const u of RPCS){try{return await one(u,method,params,8000)}catch(e){}}throw new Error('rpc down')}
 async function proxySupply(){const t=performance.now(),r=await fetch(CLAIM_API+'/api/supply',{signal:abortMs(15000)}),j=await r.json();if(!j.ok)throw new Error('proxy');return{res:{value:{uiAmountString:j.uiAmountString}},ms:Math.round(performance.now()-t),rpc:'claim-proxy'}}
 export async function snapshot(){const s=await rpc('getTokenSupply',[MINT]).catch(proxySupply),h=await rpc('getHealth',[]).catch(()=>({res:'unknown'})),slot=await rpc('getSlot',[]).catch(()=>({res:0}));
  const supply=+s.res.value.uiAmountString,minted=Math.max(supply,+(localStorage.agisMaxSeen||0));localStorage.agisMaxSeen=minted;

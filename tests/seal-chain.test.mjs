@@ -241,3 +241,19 @@ test('all inline + module scripts on changed pages parse (node --check)', async 
   }
   assert.ok(n > 8);
 });
+
+test('multi-RPC read: null/[] from a pruned endpoint falls through to the next (no false "no seal")', async () => {
+  const L = await import('../docs/js/live.js');
+  const orig = globalThis.fetch; const hits = [];
+  globalThis.fetch = async (u, o) => { hits.push(u); const b = JSON.parse(o.body); const i = L.RPCS.indexOf(u);
+    const result = i < L.RPCS.length - 1 ? (b.method === 'getTransaction' ? null : []) : (b.method === 'getTransaction' ? { ok: 1 } : [{ signature: 'x' }]);
+    return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result }) }; };
+  try {
+    assert.deepEqual((await L.rpc('getTransaction', ['t'])).res, { ok: 1 });
+    assert.deepEqual((await L.rpc('getSignaturesForAddress', ['a'])).res, [{ signature: 'x' }]);
+    assert.equal(hits.length, 2 * L.RPCS.length);
+    // all endpoints empty → still returns empty (honest "not found"), does not throw
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: null }) });
+    assert.equal((await L.rpc('getTransaction', ['t'])).res, null);
+  } finally { globalThis.fetch = orig; }
+});
